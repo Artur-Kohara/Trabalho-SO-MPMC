@@ -28,6 +28,7 @@ void inicializar_sistema(int p, int paradigma) {
     
     if (paradigma == PARADIGMA_SHM) {
         printf("Inicializando sistema com %d memórias compartilhadas (paradigma 1)...\n", p);
+        printf("Cada segmento terá tamanho de %d bytes.\n", SHM_SIZE);
         for (i = 0; i < num_estruturas; i++) {
             estruturas[i].id = i + 1;
             estruturas[i].tipo = PARADIGMA_SHM;
@@ -37,9 +38,11 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].shm_addr = NULL;
             estruturas[i].total_consumidas = 0;
             estruturas[i].total_produzidas = 0;
-            anexar_segmento_shm(estruturas[i].shmid, &estruturas[i].shm_addr);
+            if (estruturas[i].shmid != -1) {
+                anexar_segmento_shm(estruturas[i].shmid, &estruturas[i].shm_addr);
+            }
         }
-        printf("Memórias compartilhadas criadas com sucesso (tamanho: %d bytes).\n", SHM_SIZE);
+        printf("Memórias compartilhadas e semáforos criados com sucesso.\n");
     } else if (paradigma == PARADIGMA_MSG) {
         printf("Inicializando sistema com %d filas de mensagens (paradigma 2)...\n", p);
         for (i = 0; i < num_estruturas; i++) {
@@ -51,6 +54,9 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].shm_addr = NULL;
             estruturas[i].total_consumidas = 0;
             estruturas[i].total_produzidas = 0;
+            if (estruturas[i].msgid == -1) {
+                printf("Aviso: falha ao criar fila %d\n", i + 1);
+            }
         }
         printf("Filas de mensagens criadas com sucesso.\n");
     } else {
@@ -80,7 +86,7 @@ void comando_produz(char *args[]) {
     
     if (args[1] == NULL || args[2] == NULL || args[3] == NULL) {
         printf("Erro: uso correto: produz <p_prod> <n_msgs> <ack>\n");
-        printf("       onde p_prod=0 para distribuição striped\n");
+        printf("       p_prod=0 para distribuição striped (1,2,...,p,...)\n");
         return;
     }
     
@@ -101,9 +107,9 @@ void comando_produz(char *args[]) {
     
     if (p_prod != 0 && (p_prod < 1 || p_prod > num_estruturas)) {
         if (paradigma_atual == PARADIGMA_MSG) {
-            printf("Erro – fila %d nao existe\n", p_prod);
+            printf("Erro - fila %d nao existe\n", p_prod);
         } else {
-            printf("Erro – estrutura %d nao existe\n", p_prod);
+            printf("Erro - estrutura %d nao existe\n", p_prod);
         }
         return;
     }
@@ -155,9 +161,9 @@ void comando_consume(char *args[]) {
     
     if (p_prod < 1 || p_prod > num_estruturas) {
         if (paradigma_atual == PARADIGMA_MSG) {
-            printf("Erro – fila %d nao existe\n", p_prod);
+            printf("Erro - fila %d nao existe\n", p_prod);
         } else {
-            printf("Erro – estrutura %d nao existe\n", p_prod);
+            printf("Erro - estrutura %d nao existe\n", p_prod);
         }
         return;
     }
@@ -235,6 +241,11 @@ void comando_shutdown() {
             }
         }
     }
+    
+    /* Remover arquivos chave IPC */
+    unlink(MSG_KEY_FILE);
+    unlink(SHM_KEY_FILE);
+    unlink(SEM_KEY_FILE);
     
     /* Imprimir número total de mensagens consumidas em cada estrutura */
     printf("\n=== Número total de mensagens consumidas por estrutura ===\n");

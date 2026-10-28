@@ -36,8 +36,10 @@ int main(int argc, char *argv[]) {
         
         if (ack == ACK_WAIT) {
             /* ack=1: bloqueado até consumir todas as n_msgs solicitadas */
-            printf("[CONSOME PID %d] Modo bloqueante (ack=1) - aguardando %d mensagens da fila %d\n", 
+            printf("[CONSOME PID %d] Modo bloqueante (ack=1) - aguardando consumir %d mensagens da fila %d\n", 
                    meu_pid, n_msgs, p_prod);
+            printf("[CONSOME PID %d] Consumidor ficará bloqueado até que %d mensagens sejam recebidas\n", 
+                   meu_pid, n_msgs);
             while (consumidas < n_msgs) {
                 mensagem_t msg;
                 if (msgrcv(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0, 0) == -1) {
@@ -48,8 +50,9 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 consumidas++;
-                printf("[CONSOME PID %d] Mensagem %lu consumida da fila %d | pid_produtor=%d | seq=%lu\n", 
-                       meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq);
+                printf("[CONSOME PID %d] Mensagem %lu consumida da fila %d | pid_produtor=%d | seq=%lu | tempo_envio=%ld.%06ld\n", 
+                       meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq, 
+                       msg.tempo_envio.tv_sec, msg.tempo_envio.tv_usec);
             }
             printf("[CONSOME PID %d] Todas as %d mensagens solicitadas foram consumidas.\n", 
                    meu_pid, consumidas);
@@ -79,8 +82,9 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 consumidas++;
-                printf("[CONSOME PID %d] Mensagem %lu consumida da fila %d | pid_produtor=%d | seq=%lu\n", 
-                       meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq);
+                printf("[CONSOME PID %d] Mensagem %lu consumida da fila %d | pid_produtor=%d | seq=%lu | tempo_envio=%ld.%06ld\n", 
+                       meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq, 
+                       msg.tempo_envio.tv_sec, msg.tempo_envio.tv_usec);
             }
             if (consumidas == n_msgs) {
                 printf("[CONSOME PID %d] Todas as %d mensagens solicitadas foram consumidas.\n", 
@@ -89,7 +93,7 @@ int main(int argc, char *argv[]) {
         }
         
     } else if (paradigma == PARADIGMA_SHM) {
-        printf("[CONSOME PID %d] Modo memória compartilhada (shm+sem) - em desenvolvimento\n", meu_pid);
+        printf("[CONSOME PID %d] Modo memória compartilhada (shm+sem) - implementação nas próximas etapas\n", meu_pid);
         sleep(1);
     }
     

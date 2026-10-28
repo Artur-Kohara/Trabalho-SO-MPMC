@@ -7,17 +7,32 @@ int criar_fila_mensagem(int index) {
     
     /* Cria arquivo para ftok se não existir */
     f = fopen(MSG_KEY_FILE, "a");
-    if (f) fclose(f);
+    if (f == NULL) {
+        perror("fopen");
+        return -1;
+    }
+    fclose(f);
     
     key = ftok(MSG_KEY_FILE, index);
     if (key == -1) {
-        erro("ftok msg");
+        perror("ftok msg");
+        return -1;
     }
     
-    /* Cria fila de mensagens */
-    msgid = msgget(key, IPC_CREAT | 0666);
+    /* Cria fila de mensagens com permissões 0666 */
+    msgid = msgget(key, IPC_CREAT | IPC_EXCL | 0666);
     if (msgid == -1) {
-        erro("msgget");
+        if (errno == EEXIST) {
+            /* Se já existe, tenta obter */
+            msgid = msgget(key, 0666);
+            if (msgid == -1) {
+                perror("msgget existente");
+                return -1;
+            }
+        } else {
+            perror("msgget");
+            return -1;
+        }
     }
     
     return msgid;
@@ -29,11 +44,16 @@ int obter_fila_mensagem(int index) {
     FILE *f;
     
     f = fopen(MSG_KEY_FILE, "a");
-    if (f) fclose(f);
+    if (f == NULL) {
+        perror("fopen");
+        return -1;
+    }
+    fclose(f);
     
     key = ftok(MSG_KEY_FILE, index);
     if (key == -1) {
-        erro("ftok msg");
+        perror("ftok msg");
+        return -1;
     }
     
     msgid = msgget(key, 0666);

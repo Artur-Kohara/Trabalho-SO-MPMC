@@ -45,10 +45,12 @@ int main(int argc, char *argv[]) {
                 if (msgsnd(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0) == -1) {
                     perror("msgsnd");
                 } else {
-                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d (pid_prod=%d, seq=%lu)\n", 
+                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d | pid_prod=%d | seq=%lu\n", 
                            meu_pid, msg.seq, fila_destino, msg.pid_produtor, msg.seq);
                 }
             }
+            printf("[PRODUZ PID %d] Total de %d mensagens enviadas com distribuição striped\n", 
+                   meu_pid, n_msgs);
         } else {
             /* Enviar para fila específica */
             int msgid = obter_fila_mensagem(p_prod);
@@ -60,6 +62,7 @@ int main(int argc, char *argv[]) {
                 exit(EXIT_FAILURE);
             }
             
+            printf("[PRODUZ PID %d] Enviando %d mensagens para fila %d\n", meu_pid, n_msgs, p_prod);
             for (int i = 0; i < n_msgs; i++) {
                 mensagem_t msg;
                 msg.mtype = 1;
@@ -71,25 +74,28 @@ int main(int argc, char *argv[]) {
                 if (msgsnd(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0) == -1) {
                     perror("msgsnd");
                 } else {
-                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d (pid_prod=%d, seq=%lu)\n", 
+                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d | pid_prod=%d | seq=%lu\n", 
                            meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq);
                 }
             }
+            printf("[PRODUZ PID %d] Total de %d mensagens enviadas para fila %d\n", 
+                   meu_pid, n_msgs, p_prod);
         }
         
         if (ack == ACK_WAIT) {
-            printf("[PRODUZ PID %d] Aguardando confirmação: todas as %d mensagens devem ser consumidas\n", 
-                   meu_pid, n_msgs);
-            /* Aguarda confirmação (implementação simplificada - será aprimorada na etapa 5) */
-            sleep(2);
+            printf("[PRODUZ PID %d] ack=1: aguardando confirmação de que todas as mensagens foram consumidas\n", 
+                   meu_pid);
+            /* Implementação completa será na etapa 5 */
+            sleep(1);
+        } else {
+            printf("[PRODUZ PID %d] ack=2: não aguardando confirmação\n", meu_pid);
         }
         
     } else if (paradigma == PARADIGMA_SHM) {
-        printf("[PRODUZ PID %d] Modo memória compartilhada (shm+sem) - em desenvolvimento\n", meu_pid);
+        printf("[PRODUZ PID %d] Modo memória compartilhada (shm+sem) - implementação nas próximas etapas\n", meu_pid);
         if (p_prod == 0) {
             printf("[PRODUZ PID %d] Distribuição striped em %d memórias compartilhadas\n", meu_pid, p_total);
         }
-        /* Implementação será completada nas próximas etapas */
         sleep(1);
     }
     
