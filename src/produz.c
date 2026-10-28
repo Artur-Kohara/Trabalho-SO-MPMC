@@ -1,0 +1,97 @@
+#include "common.h"
+#include "shm_utils.h"
+#include "msg_utils.h"
+
+int main(int argc, char *argv[]) {
+    int paradigma, p_total, p_prod, n_msgs, ack;
+    struct timeval tempo_inicio, tempo_fim;
+    pid_t meu_pid = getpid();
+    
+    if (argc < 6) {
+        fprintf(stderr, "Uso: %s <paradigma> <p_total> <p_prod> <n_msgs> <ack>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+    
+    paradigma = atoi(argv[1]);
+    p_total = atoi(argv[2]);
+    p_prod = atoi(argv[3]);
+    n_msgs = atoi(argv[4]);
+    ack = atoi(argv[5]);
+    
+    gettimeofday(&tempo_inicio, NULL);
+    
+    printf("[PRODUZ PID %d] Iniciado - p_prod=%d, n_msgs=%d, ack=%d, paradigma=%d\n", 
+           meu_pid, p_prod, n_msgs, ack, paradigma);
+    
+    if (paradigma == PARADIGMA_MSG) {
+        if (p_prod == 0) {
+            printf("[PRODUZ PID %d] Distribuição striped em %d filas\n", meu_pid, p_total);
+            for (int i = 0; i < n_msgs; i++) {
+                int fila_destino = (i % p_total) + 1;
+                mensagem_t msg;
+                msg.mtype = 1;
+                msg.pid_produtor = meu_pid;
+                msg.seq = i + 1;
+                gettimeofday(&msg.tempo_envio, NULL);
+                sprintf(msg.dados, "Msg %lu do produtor %d", msg.seq, meu_pid);
+                
+                int msgid = obter_fila_mensagem(fila_destino);
+                if (msgid == -1) {
+                    printf("Erro – fila %d nao existe\n", fila_destino);
+                    continue;
+                }
+                
+                if (msgsnd(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0) == -1) {
+                    perror("msgsnd");
+                } else {
+                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d\n", 
+                           meu_pid, msg.seq, fila_destino);
+                }
+            }
+        } else {
+            /* Enviar para fila específica */
+            int msgid = obter_fila_mensagem(p_prod);
+            if (msgid == -1) {
+                printf("Erro – fila %d nao existe\n", p_prod);
+                gettimeofday(&tempo_fim, NULL);
+                printf("[PRODUZ PID %d] Finalizado. Tempo de execução: ", meu_pid);
+                imprimir_tempo(&tempo_inicio, &tempo_fim);
+                exit(EXIT_FAILURE);
+            }
+            
+            for (int i = 0; i < n_msgs; i++) {
+                mensagem_t msg;
+                msg.mtype = 1;
+                msg.pid_produtor = meu_pid;
+                msg.seq = i + 1;
+                gettimeofday(&msg.tempo_envio, NULL);
+                sprintf(msg.dados, "Msg %lu do produtor %d", msg.seq, meu_pid);
+                
+                if (msgsnd(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0) == -1) {
+                    perror("msgsnd");
+                } else {
+                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d\n", 
+                           meu_pid, msg.seq, p_prod);
+                }
+            }
+        }
+        
+        if (ack == ACK_WAIT) {
+            printf("[PRODUZ PID %d] Aguardando confirmação de consumo de todas as mensagens...\n", meu_pid);
+            sleep(1);
+        }
+        
+    } else if (paradigma == PARADIGMA_SHM) {
+        printf("[PRODUZ PID %d] Modo memória compartilhada - implementação em etapa futura\n", meu_pid);
+        if (p_prod == 0) {
+            printf("[PRODUZ PID %d] Distribuição striped em %d memórias\n", meu_pid, p_total);
+        }
+        sleep(1);
+    }
+    
+    gettimeofday(&tempo_fim, NULL);
+    printf("[PRODUZ PID %d] Finalizado. Tempo de execução: ", meu_pid);
+    imprimir_tempo(&tempo_inicio, &tempo_fim);
+    
+    return 0;
+}
