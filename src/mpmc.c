@@ -2,7 +2,7 @@
 #include "shm_utils.h"
 #include "msg_utils.h"
 
-#define MAX_FILHOS 2048
+#define MAX_FILHOS 4096
 
 static estrutura_info_t *estruturas = NULL;
 static proc_info_t *filhos = NULL;
@@ -17,8 +17,12 @@ void inicializar_sistema(int p, int paradigma) {
     num_estruturas = p;
     paradigma_atual = paradigma;
     
-    estruturas = (estrutura_info_t *)malloc(num_estruturas * sizeof(estrutura_info_t));
-    filhos = (proc_info_t *)malloc(MAX_FILHOS * sizeof(proc_info_t));
+    estruturas = (estrutura_info_t *)calloc(num_estruturas, sizeof(estrutura_info_t));
+    filhos = (proc_info_t *)calloc(MAX_FILHOS, sizeof(proc_info_t));
+    
+    if (estruturas == NULL || filhos == NULL) {
+        erro("malloc/calloc");
+    }
     
     gettimeofday(&tempo_inicio_mpmc, NULL);
     
@@ -76,6 +80,7 @@ void comando_produz(char *args[]) {
     
     if (args[1] == NULL || args[2] == NULL || args[3] == NULL) {
         printf("Erro: uso correto: produz <p_prod> <n_msgs> <ack>\n");
+        printf("       onde p_prod=0 para distribuição striped\n");
         return;
     }
     
@@ -84,12 +89,12 @@ void comando_produz(char *args[]) {
     ack = atoi(args[3]);
     
     /* Validação */
-    if (n_msgs < 1 || n_msgs > 1024) {
-        printf("Erro: n_msgs deve estar entre 1 e 1024\n");
+    if (n_msgs < 1 || n_msgs > MAX_MSGS) {
+        printf("Erro: n_msgs deve estar entre 1 e %d\n", MAX_MSGS);
         return;
     }
     
-    if (ack != 1 && ack != 2) {
+    if (ack != ACK_WAIT && ack != ACK_NO_WAIT) {
         printf("Erro: ack deve ser 1 ou 2\n");
         return;
     }
@@ -106,14 +111,14 @@ void comando_produz(char *args[]) {
     pid = fork();
     if (pid == 0) {
         /* Processo filho - executar produz */
-        char p_str[16], n_str[16], ack_str[16], par_str[16], total_str[16];
+        char p_str[32], n_str[32], ack_str[32], par_str[32], total_str[32];
         sprintf(p_str, "%d", p_prod);
         sprintf(n_str, "%d", n_msgs);
         sprintf(ack_str, "%d", ack);
         sprintf(par_str, "%d", paradigma_atual);
         sprintf(total_str, "%d", num_estruturas);
         
-        execl("./produz", "produz", par_str, total_str, p_str, n_str, ack_str, NULL);
+        execl("./produz", "produz", par_str, total_str, p_str, n_str, ack_str, (char *)NULL);
         perror("execl produz");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
@@ -138,12 +143,12 @@ void comando_consume(char *args[]) {
     ack = atoi(args[3]);
     
     /* Validação */
-    if (n_msgs < 1 || n_msgs > 1024) {
-        printf("Erro: n_msgs deve estar entre 1 e 1024\n");
+    if (n_msgs < 1 || n_msgs > MAX_MSGS) {
+        printf("Erro: n_msgs deve estar entre 1 e %d\n", MAX_MSGS);
         return;
     }
     
-    if (ack != 1 && ack != 2) {
+    if (ack != ACK_WAIT && ack != ACK_NO_WAIT) {
         printf("Erro: ack deve ser 1 ou 2\n");
         return;
     }
@@ -160,14 +165,14 @@ void comando_consume(char *args[]) {
     pid = fork();
     if (pid == 0) {
         /* Processo filho - executar consome */
-        char p_str[16], n_str[16], ack_str[16], par_str[16], total_str[16];
+        char p_str[32], n_str[32], ack_str[32], par_str[32], total_str[32];
         sprintf(p_str, "%d", p_prod);
         sprintf(n_str, "%d", n_msgs);
         sprintf(ack_str, "%d", ack);
         sprintf(par_str, "%d", paradigma_atual);
         sprintf(total_str, "%d", num_estruturas);
         
-        execl("./consome", "consome", par_str, total_str, p_str, n_str, ack_str, NULL);
+        execl("./consome", "consome", par_str, total_str, p_str, n_str, ack_str, (char *)NULL);
         perror("execl consome");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
@@ -182,7 +187,7 @@ void comando_shutdown() {
     int i, status;
     struct timeval tempo_fim_mpmc;
     
-    printf("\nIniciando shutdown...\n");
+    printf("\n=== SHUTDOWN ===\n");
     
     /* Terminar todos os processos filhos ativos */
     for (i = 0; i < num_filhos; i++) {
@@ -197,13 +202,14 @@ void comando_shutdown() {
     /* Aguardar finalização de todos os filhos */
     for (i = 0; i < num_filhos; i++) {
         if (!filhos[i].finalizado) {
-            waitpid(filhos[i].pid, &status, 0);
-            gettimeofday(&filhos[i].fim, NULL);
-            filhos[i].finalizado = 1;
-            printf("Processo %s (PID %d) finalizado. Tempo de execução: ", 
-                   filhos[i].tipo == 'P' ? "produz" : "consome", 
-                   filhos[i].pid);
-            imprimir_tempo(&filhos[i].inicio, &filhos[i].fim);
+            if (waitpid(filhos[i].pid, &status, 0) > 0) {
+                gettimeofday(&filhos[i].fim, NULL);
+                filhos[i].finalizado = 1;
+                printf("Processo %s (PID %d) finalizado. Tempo de execução: ", 
+                       filhos[i].tipo == 'P' ? "produz" : "consome", 
+                       filhos[i].pid);
+                imprimir_tempo(&filhos[i].inicio, &filhos[i].fim);
+            }
         }
     }
     
@@ -211,7 +217,7 @@ void comando_shutdown() {
     if (paradigma_atual == PARADIGMA_SHM) {
         printf("\nRemovendo memórias compartilhadas e semáforos...\n");
         for (i = 0; i < num_estruturas; i++) {
-            if (estruturas[i].shm_addr != NULL) {
+            if (estruturas[i].shm_addr != NULL && estruturas[i].shm_addr != (void *)-1) {
                 desanexar_segmento_shm(estruturas[i].shm_addr);
             }
             if (estruturas[i].shmid != -1) {
@@ -231,7 +237,7 @@ void comando_shutdown() {
     }
     
     /* Imprimir número total de mensagens consumidas em cada estrutura */
-    printf("\n=== Mensagens consumidas por estrutura ===\n");
+    printf("\n=== Número total de mensagens consumidas por estrutura ===\n");
     for (i = 0; i < num_estruturas; i++) {
         printf("Estrutura %d: %lu mensagens consumidas\n", 
                estruturas[i].id, estruturas[i].total_consumidas);
@@ -246,21 +252,22 @@ void comando_shutdown() {
     if (estruturas) free(estruturas);
     if (filhos) free(filhos);
     
-    printf("\nSistema finalizado.\n");
+    printf("\nSistema finalizado com sucesso.\n");
     exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char *argv[]) {
     int p, paradigma;
-    char linha[256];
-    char *args[10];
+    char linha[512];
+    char *args[12];
     char *token;
     int i;
     
     if (argc < 3) {
         printf("Uso: %s <p> <paradigma> [&]\n", argv[0]);
-        printf("  p: número de produtores/estruturas\n");
-        printf("  paradigma: 1 (memória compartilhada) ou 2 (troca de mensagens)\n");
+        printf("  p         : número de produtores/estruturas\n");
+        printf("  paradigma : 1 (memória compartilhada com shm+sem) ou 2 (troca de mensagens com msg)\n");
+        printf("\nExemplo: %s 4 1 &\n", argv[0]);
         exit(EXIT_FAILURE);
     }
     
@@ -272,18 +279,35 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     
+    if (paradigma != 1 && paradigma != 2) {
+        printf("Erro: paradigma deve ser 1 ou 2\n");
+        exit(EXIT_FAILURE);
+    }
+    
     inicializar_sistema(p, paradigma);
     
+    printf("\nSistema MPMC inicializado. Aguardando comandos...\n");
+    printf("Digite 'shutdown' para finalizar o sistema.\n\n");
+    
     while (1) {
-        printf(PROMPT);
+        printf("%s", PROMPT);
         fflush(stdout);
         
         if (fgets(linha, sizeof(linha), stdin) == NULL) {
             break;
         }
         
+        /* Remove newline e carriage return */
         linha[strcspn(linha, "\n")] = 0;
         linha[strcspn(linha, "\r")] = 0;
+        
+        /* Remove espaços em branco no início */
+        i = 0;
+        while (linha[i] == ' ' || linha[i] == '\t') i++;
+        if (linha[i] == '\0') {
+            continue;
+        }
+        memmove(linha, linha + i, strlen(linha) + 1 - i);
         
         if (strlen(linha) == 0) {
             continue;
@@ -292,11 +316,15 @@ int main(int argc, char *argv[]) {
         /* Parse argumentos */
         i = 0;
         token = strtok(linha, " \t");
-        while (token != NULL && i < 9) {
+        while (token != NULL && i < 11) {
             args[i++] = token;
             token = strtok(NULL, " \t");
         }
         args[i] = NULL;
+        
+        if (args[0] == NULL) {
+            continue;
+        }
         
         /* Processar comandos */
         if (strcmp(args[0], "produz") == 0) {
@@ -306,7 +334,7 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(args[0], "shutdown") == 0) {
             comando_shutdown();
         } else {
-            printf("Comando desconhecido: %s\n", args[0]);
+            printf("Comando desconhecido: '%s'\n", args[0]);
             printf("Comandos disponíveis: produz, consome, shutdown\n");
         }
     }

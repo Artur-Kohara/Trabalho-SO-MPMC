@@ -1,10 +1,9 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -I./include
+CFLAGS = -Wall -Wextra -g -O2 -I./include
 LDFLAGS = 
 
 SRCDIR = src
 INCDIR = include
-BINDIR = .
 
 SOURCES_MPMC = $(SRCDIR)/mpmc.c $(SRCDIR)/common.c $(SRCDIR)/shm_utils.c $(SRCDIR)/msg_utils.c
 SOURCES_PRODUZ = $(SRCDIR)/produz.c $(SRCDIR)/common.c $(SRCDIR)/shm_utils.c $(SRCDIR)/msg_utils.c
@@ -27,13 +26,13 @@ produz: $(OBJECTS_PRODUZ)
 consome: $(OBJECTS_CONSOME)
 	$(CC) $(OBJECTS_CONSOME) -o consome $(LDFLAGS)
 
-$(SRCDIR)/%.o: $(SRCDIR)/%.c
+$(SRCDIR)/%.o: $(SRCDIR)/%.c $(INCDIR)/*.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(SRCDIR)/*.o $(TARGETS) *~
 
-install: all
-	@echo "Instalação concluída"
+distclean: clean
+	rm -f /tmp/mpmc_*_key
 
-.PHONY: all clean install
+.PHONY: all clean distclean

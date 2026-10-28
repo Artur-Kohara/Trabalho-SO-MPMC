@@ -18,7 +18,7 @@
 
 #include "config.h"
 
-/* Estrutura de mensagem */
+/* Estrutura de mensagem conforme especificação */
 typedef struct {
     long mtype;
     pid_t pid_produtor;
@@ -29,12 +29,12 @@ typedef struct {
 
 /* Informações de cada estrutura (memória compartilhada ou fila de mensagens) */
 typedef struct {
-    int id;
-    int tipo;
-    int shmid;
-    int semid;
-    int msgid;
-    void *shm_addr;
+    int id;                   /* índice 1-based */
+    int tipo;                 /* PARADIGMA_SHM ou PARADIGMA_MSG */
+    int shmid;                /* para shm */
+    int semid;                /* para semáforos */
+    int msgid;                /* para fila de mensagens */
+    void *shm_addr;           /* endereço anexado */
     unsigned long total_consumidas;
     unsigned long total_produzidas;
 } estrutura_info_t;
@@ -43,7 +43,7 @@ typedef struct {
 typedef struct {
     pid_t pid;
     char tipo;                /* 'P' para produz, 'C' para consome */
-    int estrutura;
+    int estrutura;            /* estrutura alvo ou 0 para striped */
     int n_msgs;
     int ack;
     struct timeval inicio;
@@ -54,5 +54,6 @@ typedef struct {
 /* Funções utilitárias */
 void erro(char *msg);
 void imprimir_tempo(struct timeval *inicio, struct timeval *fim);
+double tempo_em_segundos(struct timeval *inicio, struct timeval *fim);
 
 #endif
