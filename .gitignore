@@ -1,0 +1,34 @@
+# Arquivos objeto
+*.o
+*.obj
+
+# Executáveis
+mpmc
+produz
+consome
+*.exe
+*.out
+
+# Arquivos temporários
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Arquivos de chave IPC
+/tmp/mpmc_*_key
+mpmc_*_key
+
+# Logs
+*.log
+
+# Diretórios
+bin/
+obj/
+core
+core.*
+
+# Arquivos do editor
+.vscode/
+.idea/
+*.code-workspace
