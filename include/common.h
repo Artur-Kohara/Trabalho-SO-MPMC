@@ -27,6 +27,14 @@ typedef struct {
     char dados[64];
 } mensagem_t;
 
+/* Estrutura de confirmação ACK */
+typedef struct {
+    long mtype;
+    pid_t pid_produtor;
+    int produtor_pid_num;
+    unsigned long mensagens_consumidas;
+} ack_msg_t;
+
 /* Informações de cada estrutura (memória compartilhada ou fila de mensagens) */
 typedef struct {
     int id;                   /* índice 1-based */
@@ -34,6 +42,7 @@ typedef struct {
     int shmid;                /* para shm */
     int semid;                /* para semáforos */
     int msgid;                /* para fila de mensagens */
+    int ack_msgid;            /* fila para confirmações ACK */
     void *shm_addr;           /* endereço anexado */
     unsigned long total_consumidas;
     unsigned long total_produzidas;

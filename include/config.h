@@ -9,6 +9,7 @@
 #define MSG_KEY_FILE "/tmp/mpmc_msg_key"
 #define SHM_KEY_FILE "/tmp/mpmc_shm_key"
 #define SEM_KEY_FILE "/tmp/mpmc_sem_key"
+#define ACK_KEY_FILE "/tmp/mpmc_ack_key"
 
 #define ACK_WAIT 1
 #define ACK_NO_WAIT 2

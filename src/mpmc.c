@@ -35,6 +35,7 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].shmid = criar_segmento_shm(i + 1);
             estruturas[i].semid = criar_semaforos_shm(i + 1);
             estruturas[i].msgid = -1;
+            estruturas[i].ack_msgid = -1;
             estruturas[i].shm_addr = NULL;
             estruturas[i].total_consumidas = 0;
             estruturas[i].total_produzidas = 0;
@@ -73,14 +74,18 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].shmid = -1;
             estruturas[i].semid = -1;
             estruturas[i].msgid = criar_fila_mensagem(i + 1);
+            estruturas[i].ack_msgid = criar_fila_ack(i + 1);
             estruturas[i].shm_addr = NULL;
             estruturas[i].total_consumidas = 0;
             estruturas[i].total_produzidas = 0;
             if (estruturas[i].msgid == -1) {
                 printf("Aviso: falha ao criar fila %d\n", i + 1);
             }
+            if (estruturas[i].ack_msgid == -1) {
+                printf("Aviso: falha ao criar fila ACK %d\n", i + 1);
+            }
         }
-        printf("Filas de mensagens criadas com sucesso.\n");
+        printf("Filas de mensagens e filas de confirmação criadas com sucesso.\n");
     } else {
         printf("Erro: paradigma inválido. Use 1 (memória compartilhada) ou 2 (troca de mensagens).\n");
         exit(EXIT_FAILURE);
@@ -261,6 +266,9 @@ void comando_shutdown() {
             if (estruturas[i].msgid != -1) {
                 remover_fila_mensagem(estruturas[i].msgid);
             }
+            if (estruturas[i].ack_msgid != -1) {
+                remover_fila_ack(estruturas[i].ack_msgid);
+            }
         }
     }
     
@@ -268,6 +276,7 @@ void comando_shutdown() {
     unlink(MSG_KEY_FILE);
     unlink(SHM_KEY_FILE);
     unlink(SEM_KEY_FILE);
+    unlink(ACK_KEY_FILE);
     
     printf("\n=== Número total de mensagens consumidas por estrutura ===\n");
     for (i = 0; i < num_estruturas; i++) {

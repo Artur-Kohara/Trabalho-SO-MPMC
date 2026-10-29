@@ -7,6 +7,8 @@ int main(int argc, char *argv[]) {
     struct timeval tempo_inicio, tempo_fim;
     pid_t meu_pid = getpid();
     int consumidas = 0;
+    mensagem_t ultimo_msg;
+    ultimo_msg.pid_produtor = 0;
     
     if (argc < 6) {
         fprintf(stderr, "Uso: %s <paradigma> <p_total> <p_prod> <n_msgs> <ack>\n", argv[0]);
@@ -34,10 +36,13 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
         
+        int ack_msgid = obter_fila_ack(p_prod);
+        
         if (ack == ACK_WAIT) {
             /* ack=1: bloqueado até consumir todas as n_msgs solicitadas */
             printf("[CONSOME PID %d] Modo bloqueante (ack=1) - aguardando consumir %d mensagens da fila %d\n", 
                    meu_pid, n_msgs, p_prod);
+            printf("[CONSOME PID %d] Ficar bloqueado até que mensagens sejam disponíveis\n", meu_pid);
             while (consumidas < n_msgs) {
                 mensagem_t msg;
                 if (msgrcv(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0, 0) == -1) {
@@ -48,12 +53,26 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 consumidas++;
+                ultimo_msg = msg;
                 printf("[CONSOME PID %d] Mensagem %lu consumida da fila %d | pid_produtor=%d | seq=%lu | tempo_envio=%ld.%06ld\n", 
                        meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq, 
                        msg.tempo_envio.tv_sec, msg.tempo_envio.tv_usec);
             }
             printf("[CONSOME PID %d] Todas as %d mensagens solicitadas foram consumidas.\n", 
                    meu_pid, consumidas);
+            /* Enviar confirmação para o produtor */
+            if (ack_msgid != -1 && ultimo_msg.pid_produtor != 0) {
+                ack_msg_t ack_msg;
+                ack_msg.mtype = ultimo_msg.pid_produtor;
+                ack_msg.pid_produtor = meu_pid;
+                ack_msg.produtor_pid_num = ultimo_msg.pid_produtor;
+                ack_msg.mensagens_consumidas = consumidas;
+                if (msgsnd(ack_msgid, &ack_msg, sizeof(ack_msg_t) - sizeof(long), 0) == -1) {
+                    perror("msgsnd ack");
+                } else {
+                    printf("[CONSOME PID %d] Confirmação enviada ao produtor PID %d\n", meu_pid, ultimo_msg.pid_produtor);
+                }
+            }
             
         } else { /* ACK_NO_WAIT = 2 */
             /* ack=2: se houver menos mensagens, retorna erro informando quantas foram consumidas */
@@ -119,12 +138,13 @@ int main(int argc, char *argv[]) {
         int semid = semget(skey, 3, 0666);
         
         if (ack == ACK_WAIT) {
+            /* ack=1: bloqueado até consumir todas as n_msgs solicitadas */
             printf("[CONSOME PID %d] Modo bloqueante (ack=1) - aguardando consumir %d mensagens da memória %d\n", 
                    meu_pid, n_msgs, p_prod);
             while (consumidas < n_msgs) {
                 if (semid != -1) {
-                    sem_p(semid, 2); /* esperar por mensagem cheia */
-                    sem_p(semid, 0); /* entrar em região crítica */
+                    sem_p(semid, 2);
+                    sem_p(semid, 0);
                 }
                 
                 shm_header_t *hdr = (shm_header_t *)addr;
@@ -144,12 +164,11 @@ int main(int argc, char *argv[]) {
                 }
                 
                 if (semid != -1) {
-                    sem_v(semid, 0); /* sair da região crítica */
-                    sem_v(semid, 1); /* sinalizar espaço vazio */
+                    sem_v(semid, 0);
+                    sem_v(semid, 1);
                 }
                 
                 if (hdr->count == 0 && consumidas < n_msgs) {
-                    /* Pequena pausa para evitar busy wait caso necessário */
                     usleep(10000);
                 }
             }
@@ -161,13 +180,12 @@ int main(int argc, char *argv[]) {
                    meu_pid, n_msgs, p_prod);
             while (consumidas < n_msgs) {
                 if (semid != -1) {
-                    /* Tentar pegar sem bloqueio - usar operação com flag IPC_NOWAIT */
                     struct sembuf op;
                     op.sem_num = 2;
                     op.sem_op = -1;
                     op.sem_flg = IPC_NOWAIT;
                     if (semop(semid, &op, 1) == -1) {
-                        if (errno == EAGAIN || errno == ENOSPC) {
+                        if (errno == EAGAIN || errno == EBUSY) {
                             if (consumidas == 0) {
                                 printf("[CONSOME PID %d] Erro: não há mensagens disponíveis. Foram consumidas 0 mensagens.\n", 
                                        meu_pid);
@@ -183,7 +201,6 @@ int main(int argc, char *argv[]) {
                     }
                     sem_p(semid, 0);
                 } else {
-                    /* Sem semáforos, apenas verificar */
                     shm_header_t *hdr = (shm_header_t *)addr;
                     if (hdr->count == 0) {
                         if (consumidas == 0) {
