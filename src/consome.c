@@ -2,6 +2,24 @@
 #include "shm_utils.h"
 #include "msg_utils.h"
 
+static void incrementar_contador_msg(int p_prod) {
+    key_t key;
+    FILE *f = fopen(SHM_KEY_FILE, "a");
+    if (f) fclose(f);
+    key = ftok(SHM_KEY_FILE, 10000 + p_prod);
+    int shmid = shmget(key, sizeof(unsigned long), 0666);
+    if (shmid == -1) {
+        return;
+    }
+    void *addr = shmat(shmid, NULL, 0);
+    if (addr == (void *)-1) {
+        return;
+    }
+    unsigned long *cnt = (unsigned long *)addr;
+    (*cnt)++;
+    shmdt(addr);
+}
+
 int main(int argc, char *argv[]) {
     int paradigma, p_prod, n_msgs, ack;
     struct timeval tempo_inicio, tempo_fim;
@@ -39,10 +57,8 @@ int main(int argc, char *argv[]) {
         int ack_msgid = obter_fila_ack(p_prod);
         
         if (ack == ACK_WAIT) {
-            /* ack=1: bloqueado até consumir todas as n_msgs solicitadas */
             printf("[CONSOME PID %d] Modo bloqueante (ack=1) - aguardando consumir %d mensagens da fila %d\n", 
                    meu_pid, n_msgs, p_prod);
-            printf("[CONSOME PID %d] Ficar bloqueado até que mensagens sejam disponíveis\n", meu_pid);
             while (consumidas < n_msgs) {
                 mensagem_t msg;
                 if (msgrcv(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0, 0) == -1) {
@@ -54,13 +70,13 @@ int main(int argc, char *argv[]) {
                 }
                 consumidas++;
                 ultimo_msg = msg;
+                incrementar_contador_msg(p_prod);
                 printf("[CONSOME PID %d] Mensagem %lu consumida da fila %d | pid_produtor=%d | seq=%lu | tempo_envio=%ld.%06ld\n", 
                        meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq, 
                        msg.tempo_envio.tv_sec, msg.tempo_envio.tv_usec);
             }
             printf("[CONSOME PID %d] Todas as %d mensagens solicitadas foram consumidas.\n", 
                    meu_pid, consumidas);
-            /* Enviar confirmação para o produtor */
             if (ack_msgid != -1 && ultimo_msg.pid_produtor != 0) {
                 ack_msg_t ack_msg;
                 ack_msg.mtype = ultimo_msg.pid_produtor;
@@ -74,15 +90,13 @@ int main(int argc, char *argv[]) {
                 }
             }
             
-        } else { /* ACK_NO_WAIT = 2 */
-            /* ack=2: se houver menos mensagens, retorna erro informando quantas foram consumidas */
+        } else {
             printf("[CONSOME PID %d] Modo não-bloqueante (ack=2) - tentando consumir %d mensagens da fila %d\n", 
                    meu_pid, n_msgs, p_prod);
             while (consumidas < n_msgs) {
                 mensagem_t msg;
                 if (msgrcv(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0, IPC_NOWAIT) == -1) {
                     if (errno == ENOMSG) {
-                        /* Não há mais mensagens disponíveis */
                         if (consumidas == 0) {
                             printf("[CONSOME PID %d] Erro: não há mensagens disponíveis. Foram consumidas 0 mensagens.\n", 
                                    meu_pid);
@@ -99,6 +113,7 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 consumidas++;
+                incrementar_contador_msg(p_prod);
                 printf("[CONSOME PID %d] Mensagem %lu consumida da fila %d | pid_produtor=%d | seq=%lu | tempo_envio=%ld.%06ld\n", 
                        meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq, 
                        msg.tempo_envio.tv_sec, msg.tempo_envio.tv_usec);
@@ -138,7 +153,6 @@ int main(int argc, char *argv[]) {
         int semid = semget(skey, 3, 0666);
         
         if (ack == ACK_WAIT) {
-            /* ack=1: bloqueado até consumir todas as n_msgs solicitadas */
             printf("[CONSOME PID %d] Modo bloqueante (ack=1) - aguardando consumir %d mensagens da memória %d\n", 
                    meu_pid, n_msgs, p_prod);
             while (consumidas < n_msgs) {
@@ -175,7 +189,7 @@ int main(int argc, char *argv[]) {
             printf("[CONSOME PID %d] Todas as %d mensagens solicitadas foram consumidas.\n", 
                    meu_pid, consumidas);
             
-        } else { /* ACK_NO_WAIT */
+        } else {
             printf("[CONSOME PID %d] Modo não-bloqueante (ack=2) - tentando consumir %d mensagens da memória %d\n", 
                    meu_pid, n_msgs, p_prod);
             while (consumidas < n_msgs) {

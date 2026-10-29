@@ -44,6 +44,8 @@ typedef struct {
     int msgid;                /* para fila de mensagens */
     int ack_msgid;            /* fila para confirmações ACK */
     void *shm_addr;           /* endereço anexado */
+    void *cnt_addr;           /* contador compartilhado */
+    int cnt_shmid;            /* shm para contador */
     unsigned long total_consumidas;
     unsigned long total_produzidas;
 } estrutura_info_t;
@@ -52,7 +54,7 @@ typedef struct {
 typedef struct {
     pid_t pid;
     char tipo;                /* 'P' para produz, 'C' para consome */
-    int estrutura;            /* estrutura alvo ou 0 para striped */
+    int estrutura;
     int n_msgs;
     int ack;
     struct timeval inicio;

@@ -9,7 +9,7 @@
 Implementação de um sistema com múltiplos produtores e múltiplos consumidores (MPMC) utilizando dois paradigmas de comunicação entre processos: 
 
 - **Paradigma 1 - Memória Compartilhada:** Utilizando segmentos `shm` e semáforos `sem`. Cada estrutura possui um segmento de memória compartilhada de **2048 bytes** com buffer circular.
-- **Paradigma 2 - Troca de Mensagens:** Utilizando filas de mensagens `msg` (`msgget`, `msgsnd`, `msgrcv`) com fila de confirmação for mecanismo ACK.
+- **Paradigma 2 - Troca de Mensagens:** Utilizando filas de mensagens `msg` (`msgget`, `msgsnd`, `msgrcv`) com fila de confirmação para mecanismo ACK.
 
 O processo `mpmc` funciona como um shell interativo com o prompt `>>`, sendo responsável por criar e gerenciar os processos `produz` e `consome`, além de realizar a limpeza dos recursos ao finalizar.
 
@@ -90,7 +90,7 @@ Ao executar o `shutdown`, o `mpmc` irá:
 - [x] **Etapa 5:** Sincronização e mecanismo ACK completo
 - [x] **Etapa 6:** Distribuição striped e validações
 - [x] **Etapa 7:** Shutdown completo com limpeza de IPCs e estatísticas
-- [ ] **Etapa 8:** Testes com exemplos
+- [x] **Etapa 8:** Testes, debug e ajustes
 
 ## Observações
 
@@ -105,3 +105,4 @@ Ao executar o `shutdown`, o `mpmc` irá:
 - Consumidor com `ack=1` fica bloqueado aguardando mensagens. Com `ack=2` retorna erro informando quantas mensagens foram consumidas caso não haja suficientes.
 - Produtor com `ack=1` aguarda confirmação de que todas as mensagens foram consumidas.
 - `shutdown` termina todos os processos, imprime tempos de execução individuais e tempo total do mpmc, remove todos os IPCs e limpa arquivos de chave.
+- Todos os exemplos do enunciado foram testados e validados.

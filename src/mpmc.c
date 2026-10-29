@@ -37,6 +37,8 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].msgid = -1;
             estruturas[i].ack_msgid = -1;
             estruturas[i].shm_addr = NULL;
+            estruturas[i].cnt_addr = NULL;
+            estruturas[i].cnt_shmid = -1;
             estruturas[i].total_consumidas = 0;
             estruturas[i].total_produzidas = 0;
             if (estruturas[i].shmid != -1) {
@@ -74,6 +76,8 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].msgid = criar_fila_mensagem(i + 1);
             estruturas[i].ack_msgid = criar_fila_ack(i + 1);
             estruturas[i].shm_addr = NULL;
+            estruturas[i].cnt_addr = NULL;
+            estruturas[i].cnt_shmid = -1;
             estruturas[i].total_consumidas = 0;
             estruturas[i].total_produzidas = 0;
             if (estruturas[i].msgid == -1) {
@@ -81,6 +85,14 @@ void inicializar_sistema(int p, int paradigma) {
             }
             if (estruturas[i].ack_msgid == -1) {
                 printf("Aviso: falha ao criar fila ACK %d\n", i + 1);
+            }
+            /* Criar memória compartilhada para contador de mensagens consumidas */
+            estruturas[i].cnt_shmid = criar_segmento_shm(10000 + i + 1);
+            if (estruturas[i].cnt_shmid != -1) {
+                anexar_segmento_shm(estruturas[i].cnt_shmid, &estruturas[i].cnt_addr);
+                if (estruturas[i].cnt_addr != NULL && estruturas[i].cnt_addr != (void *)-1) {
+                    memset(estruturas[i].cnt_addr, 0, sizeof(unsigned long));
+                }
             }
         }
         printf("Filas de mensagens e filas de confirmação criadas com sucesso.\n");
@@ -183,9 +195,9 @@ void comando_consume(char *args[]) {
     
     if (p_prod < 1 || p_prod > num_estruturas) {
         if (paradigma_atual == PARADIGMA_MSG) {
-            printf("Erro - fila %d nao existe\n", p_prod);
+            printf("Erro – fila %d nao existe\n", p_prod);
         } else {
-            printf("Erro - estrutura %d nao existe\n", p_prod);
+            printf("Erro – estrutura %d nao existe\n", p_prod);
         }
         return;
     }
@@ -213,7 +225,6 @@ void comando_consume(char *args[]) {
 void comando_shutdown() {
     int i, status;
     struct timeval tempo_fim_mpmc;
-    int algum_finalizado = 0;
     
     printf("\n=== SHUTDOWN ===\n");
     
@@ -249,7 +260,6 @@ void comando_shutdown() {
             if (waitpid(filhos[i].pid, &status, 0) > 0) {
                 gettimeofday(&filhos[i].fim, NULL);
                 filhos[i].finalizado = 1;
-                algum_finalizado = 1;
                 printf("Processo %s (PID %d) - estrutura %d, n_msgs %d, ack %d: tempo de execução = ", 
                        filhos[i].tipo == 'P' ? "PRODUZ" : "CONSOME", 
                        filhos[i].pid,
@@ -273,7 +283,7 @@ void comando_shutdown() {
         printf("Nenhum processo filho foi criado.\n");
     }
     
-    /* Atualizar contadores de consumo a partir da memória compartilhada se necessário */
+    /* Atualizar contadores */
     if (paradigma_atual == PARADIGMA_SHM) {
         for (i = 0; i < num_estruturas; i++) {
             if (estruturas[i].shm_addr != NULL && estruturas[i].shm_addr != (void *)-1) {
@@ -283,8 +293,15 @@ void comando_shutdown() {
                 }
             }
         }
+    } else if (paradigma_atual == PARADIGMA_MSG) {
+        for (i = 0; i < num_estruturas; i++) {
+            if (estruturas[i].cnt_addr != NULL && estruturas[i].cnt_addr != (void *)-1) {
+                estruturas[i].total_consumidas = *(unsigned long *)estruturas[i].cnt_addr;
+            }
+        }
     }
     
+    /* Remover mecanismos IPC */
     if (paradigma_atual == PARADIGMA_SHM) {
         printf("\n=== Removendo mecanismos IPC ===\n");
         printf("Removendo memórias compartilhadas e semáforos...\n");
@@ -309,6 +326,12 @@ void comando_shutdown() {
             }
             if (estruturas[i].ack_msgid != -1) {
                 remover_fila_ack(estruturas[i].ack_msgid);
+            }
+            if (estruturas[i].cnt_addr != NULL && estruturas[i].cnt_addr != (void *)-1) {
+                desanexar_segmento_shm(estruturas[i].cnt_addr);
+            }
+            if (estruturas[i].cnt_shmid != -1) {
+                remover_segmento_shm(estruturas[i].cnt_shmid);
             }
         }
         printf("Filas de mensagens removidas.\n");
