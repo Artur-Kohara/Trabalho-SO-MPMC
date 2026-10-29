@@ -40,6 +40,28 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].total_produzidas = 0;
             if (estruturas[i].shmid != -1) {
                 anexar_segmento_shm(estruturas[i].shmid, &estruturas[i].shm_addr);
+                /* Inicializar cabeçalho e semáforos */
+                if (estruturas[i].shm_addr != NULL && estruturas[i].shm_addr != (void *)-1) {
+                    shm_header_t *hdr = (shm_header_t *)estruturas[i].shm_addr;
+                    hdr->cabeca = 0;
+                    hdr->cauda = 0;
+                    hdr->count = 0;
+                    hdr->total_produzidas = 0;
+                    hdr->total_consumidas = 0;
+                    /* Calcular capacidade baseada no espaço disponível */
+                    size_t espaco_disponivel = SHM_SIZE - sizeof(shm_header_t);
+                    hdr->capacidade = espaco_disponivel / sizeof(mensagem_t);
+                    hdr->iniciado = 1;
+                    printf("  Estrutura %d: capacidade para %d mensagens\n", i + 1, hdr->capacidade);
+                }
+            }
+            if (estruturas[i].semid != -1) {
+                if (estruturas[i].shm_addr != NULL && estruturas[i].shm_addr != (void *)-1) {
+                    shm_header_t *hdr = (shm_header_t *)estruturas[i].shm_addr;
+                    inicializar_semaforos(estruturas[i].semid, hdr->capacidade);
+                } else {
+                    inicializar_semaforos(estruturas[i].semid, 10);
+                }
             }
         }
         printf("Memórias compartilhadas e semáforos criados com sucesso.\n");
@@ -247,7 +269,6 @@ void comando_shutdown() {
     unlink(SHM_KEY_FILE);
     unlink(SEM_KEY_FILE);
     
-    /* Imprimir número total de mensagens consumidas em cada estrutura */
     printf("\n=== Número total de mensagens consumidas por estrutura ===\n");
     for (i = 0; i < num_estruturas; i++) {
         printf("Estrutura %d: %lu mensagens consumidas\n", 
