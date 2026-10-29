@@ -41,7 +41,6 @@ void inicializar_sistema(int p, int paradigma) {
             estruturas[i].total_produzidas = 0;
             if (estruturas[i].shmid != -1) {
                 anexar_segmento_shm(estruturas[i].shmid, &estruturas[i].shm_addr);
-                /* Inicializar cabeçalho e semáforos */
                 if (estruturas[i].shm_addr != NULL && estruturas[i].shm_addr != (void *)-1) {
                     shm_header_t *hdr = (shm_header_t *)estruturas[i].shm_addr;
                     hdr->cabeca = 0;
@@ -49,7 +48,6 @@ void inicializar_sistema(int p, int paradigma) {
                     hdr->count = 0;
                     hdr->total_produzidas = 0;
                     hdr->total_consumidas = 0;
-                    /* Calcular capacidade baseada no espaço disponível */
                     size_t espaco_disponivel = SHM_SIZE - sizeof(shm_header_t);
                     hdr->capacidade = espaco_disponivel / sizeof(mensagem_t);
                     hdr->iniciado = 1;
@@ -121,7 +119,6 @@ void comando_produz(char *args[]) {
     n_msgs = atoi(args[2]);
     ack = atoi(args[3]);
     
-    /* Validação */
     if (n_msgs < 1 || n_msgs > MAX_MSGS) {
         printf("Erro: n_msgs deve estar entre 1 e %d\n", MAX_MSGS);
         return;
@@ -143,7 +140,6 @@ void comando_produz(char *args[]) {
     
     pid = fork();
     if (pid == 0) {
-        /* Processo filho - executar produz */
         char p_str[32], n_str[32], ack_str[32], par_str[32], total_str[32];
         sprintf(p_str, "%d", p_prod);
         sprintf(n_str, "%d", n_msgs);
@@ -175,7 +171,6 @@ void comando_consume(char *args[]) {
     n_msgs = atoi(args[2]);
     ack = atoi(args[3]);
     
-    /* Validação */
     if (n_msgs < 1 || n_msgs > MAX_MSGS) {
         printf("Erro: n_msgs deve estar entre 1 e %d\n", MAX_MSGS);
         return;
@@ -197,7 +192,6 @@ void comando_consume(char *args[]) {
     
     pid = fork();
     if (pid == 0) {
-        /* Processo filho - executar consome */
         char p_str[32], n_str[32], ack_str[32], par_str[32], total_str[32];
         sprintf(p_str, "%d", p_prod);
         sprintf(n_str, "%d", n_msgs);
@@ -219,6 +213,7 @@ void comando_consume(char *args[]) {
 void comando_shutdown() {
     int i, status;
     struct timeval tempo_fim_mpmc;
+    int algum_finalizado = 0;
     
     printf("\n=== SHUTDOWN ===\n");
     
@@ -232,23 +227,67 @@ void comando_shutdown() {
         }
     }
     
-    /* Aguardar finalização de todos os filhos */
+    /* Aguardar um pouco para finalização */
+    usleep(100000);
+    
+    /* Forçar terminação caso ainda estejam rodando */
+    for (i = 0; i < num_filhos; i++) {
+        if (!filhos[i].finalizado) {
+            if (kill(filhos[i].pid, 0) == 0) {
+                printf("Forçando término do processo %s PID %d...\n", 
+                       filhos[i].tipo == 'P' ? "produz" : "consome", 
+                       filhos[i].pid);
+                kill(filhos[i].pid, SIGKILL);
+            }
+        }
+    }
+    
+    /* Aguardar finalização de todos os filhos e coletar tempos */
+    printf("\n=== Tempos de execução dos processos ===\n");
     for (i = 0; i < num_filhos; i++) {
         if (!filhos[i].finalizado) {
             if (waitpid(filhos[i].pid, &status, 0) > 0) {
                 gettimeofday(&filhos[i].fim, NULL);
                 filhos[i].finalizado = 1;
-                printf("Processo %s (PID %d) finalizado. Tempo de execução: ", 
-                       filhos[i].tipo == 'P' ? "produz" : "consome", 
-                       filhos[i].pid);
+                algum_finalizado = 1;
+                printf("Processo %s (PID %d) - estrutura %d, n_msgs %d, ack %d: tempo de execução = ", 
+                       filhos[i].tipo == 'P' ? "PRODUZ" : "CONSOME", 
+                       filhos[i].pid,
+                       filhos[i].estrutura,
+                       filhos[i].n_msgs,
+                       filhos[i].ack);
                 imprimir_tempo(&filhos[i].inicio, &filhos[i].fim);
+            }
+        } else {
+            printf("Processo %s (PID %d) - estrutura %d, n_msgs %d, ack %d: tempo de execução = ", 
+                   filhos[i].tipo == 'P' ? "PRODUZ" : "CONSOME", 
+                   filhos[i].pid,
+                   filhos[i].estrutura,
+                   filhos[i].n_msgs,
+                   filhos[i].ack);
+            imprimir_tempo(&filhos[i].inicio, &filhos[i].fim);
+        }
+    }
+    
+    if (num_filhos == 0) {
+        printf("Nenhum processo filho foi criado.\n");
+    }
+    
+    /* Atualizar contadores de consumo a partir da memória compartilhada se necessário */
+    if (paradigma_atual == PARADIGMA_SHM) {
+        for (i = 0; i < num_estruturas; i++) {
+            if (estruturas[i].shm_addr != NULL && estruturas[i].shm_addr != (void *)-1) {
+                shm_header_t *hdr = (shm_header_t *)estruturas[i].shm_addr;
+                if (hdr->total_consumidas > 0) {
+                    estruturas[i].total_consumidas = hdr->total_consumidas;
+                }
             }
         }
     }
     
-    /* Remover mecanismos IPC */
     if (paradigma_atual == PARADIGMA_SHM) {
-        printf("\nRemovendo memórias compartilhadas e semáforos...\n");
+        printf("\n=== Removendo mecanismos IPC ===\n");
+        printf("Removendo memórias compartilhadas e semáforos...\n");
         for (i = 0; i < num_estruturas; i++) {
             if (estruturas[i].shm_addr != NULL && estruturas[i].shm_addr != (void *)-1) {
                 desanexar_segmento_shm(estruturas[i].shm_addr);
@@ -260,8 +299,10 @@ void comando_shutdown() {
                 remover_semaforos_shm(estruturas[i].semid);
             }
         }
+        printf("Memórias compartilhadas e semáforos removidos.\n");
     } else if (paradigma_atual == PARADIGMA_MSG) {
-        printf("\nRemovendo filas de mensagens...\n");
+        printf("\n=== Removendo mecanismos IPC ===\n");
+        printf("Removendo filas de mensagens...\n");
         for (i = 0; i < num_estruturas; i++) {
             if (estruturas[i].msgid != -1) {
                 remover_fila_mensagem(estruturas[i].msgid);
@@ -270,6 +311,7 @@ void comando_shutdown() {
                 remover_fila_ack(estruturas[i].ack_msgid);
             }
         }
+        printf("Filas de mensagens removidas.\n");
     }
     
     /* Remover arquivos chave IPC */
@@ -278,13 +320,12 @@ void comando_shutdown() {
     unlink(SEM_KEY_FILE);
     unlink(ACK_KEY_FILE);
     
-    printf("\n=== Número total de mensagens consumidas por estrutura ===\n");
+    printf("\n=== Número total de mensagens consumidas em cada estrutura ===\n");
     for (i = 0; i < num_estruturas; i++) {
         printf("Estrutura %d: %lu mensagens consumidas\n", 
                estruturas[i].id, estruturas[i].total_consumidas);
     }
     
-    /* Imprimir tempo de operação do mpmc */
     gettimeofday(&tempo_fim_mpmc, NULL);
     printf("\n=== Tempo de operação do mpmc ===\n");
     printf("Tempo total: ");
@@ -305,10 +346,10 @@ int main(int argc, char *argv[]) {
     int i;
     
     if (argc < 3) {
-        printf("Uso: %s <p> <paradigma> [&]\n", argv[0]);
+        printf("Uso: %s <p> <paradigma>\n", argv[0]);
         printf("  p         : número de produtores/estruturas\n");
         printf("  paradigma : 1 (memória compartilhada com shm+sem) ou 2 (troca de mensagens com msg)\n");
-        printf("\nExemplo: %s 4 1 &\n", argv[0]);
+        printf("\nExemplo: %s 4 1\n", argv[0]);
         exit(EXIT_FAILURE);
     }
     
@@ -338,11 +379,9 @@ int main(int argc, char *argv[]) {
             break;
         }
         
-        /* Remove newline e carriage return */
         linha[strcspn(linha, "\n")] = 0;
         linha[strcspn(linha, "\r")] = 0;
         
-        /* Remove espaços em branco no início */
         i = 0;
         while (linha[i] == ' ' || linha[i] == '\t') i++;
         if (linha[i] == '\0') {
@@ -354,7 +393,6 @@ int main(int argc, char *argv[]) {
             continue;
         }
         
-        /* Parse argumentos */
         i = 0;
         token = strtok(linha, " \t");
         while (token != NULL && i < 11) {
@@ -367,7 +405,6 @@ int main(int argc, char *argv[]) {
             continue;
         }
         
-        /* Processar comandos */
         if (strcmp(args[0], "produz") == 0) {
             comando_produz(args);
         } else if (strcmp(args[0], "consome") == 0) {
