@@ -2,294 +2,218 @@
 #include "shm_utils.h"
 #include "msg_utils.h"
 
+/* Uso: produz <paradigma> <p_prod> <n_msgs> <ack> <ack_id> <fila_ack> <estruturas>
+ *   estruturas : identificadores IPC das p estruturas, separados por vírgula:
+ *                "shmid:semid" no paradigma 1, "msgid" no paradigma 2
+ *   ack_id     : paradigma 1 - semáforo de confirmação deste produtor (-1 se ack=2)
+ *                paradigma 2 - número deste produtor (mtype das confirmações)
+ *   fila_ack   : paradigma 2 - fila de confirmações (-1 no paradigma 1) */
+
+static int ids_a[MAX_PROD], ids_b[MAX_PROD];
+static void *enderecos[MAX_PROD];
+
 int main(int argc, char *argv[]) {
-    int paradigma, p_total, p_prod, n_msgs, ack;
-    struct timeval tempo_inicio, tempo_fim;
+    int paradigma, p_total, p_prod, n_msgs, ack, ack_id, fila_ack;
+    struct timespec tempo_inicio;
     pid_t meu_pid = getpid();
     unsigned long total_enviadas = 0;
-    
-    if (argc < 6) {
-        fprintf(stderr, "Uso: %s <paradigma> <p_total> <p_prod> <n_msgs> <ack>\n", argv[0]);
+    int falhou = 0;   /* alguma operação IPC falhou: o processo termina com código 1 */
+
+    if (argc < 8) {
+        fprintf(stderr, "Uso: %s <paradigma> <p_prod> <n_msgs> <ack> <ack_id> <fila_ack> <estruturas>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
-    
+
     paradigma = atoi(argv[1]);
-    p_total = atoi(argv[2]);
-    p_prod = atoi(argv[3]);
-    n_msgs = atoi(argv[4]);
-    ack = atoi(argv[5]);
-    
-    gettimeofday(&tempo_inicio, NULL);
-    
-    printf("[PRODUZ PID %d] Iniciado - estrutura=%d, n_msgs=%d, ack=%d, paradigma=%d\n", 
+    p_prod = atoi(argv[2]);
+    n_msgs = atoi(argv[3]);
+    ack = atoi(argv[4]);
+    ack_id = atoi(argv[5]);
+    fila_ack = atoi(argv[6]);
+    p_total = ler_ids(argv[7], ids_a, ids_b, MAX_PROD);
+    if (p_total < 1 || p_prod < 0 || p_prod > p_total) {
+        fprintf(stderr, "produz: lista de estruturas inválida\n");
+        exit(EXIT_FAILURE);
+    }
+
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    instalar_encerramento_gracioso();
+    agora(&tempo_inicio);
+
+    printf("[PRODUZ PID %d] Iniciado - estrutura=%d, n_msgs=%d, ack=%d, paradigma=%d\n",
            meu_pid, p_prod, n_msgs, ack, paradigma);
-    
+
     if (paradigma == PARADIGMA_MSG) {
         if (p_prod == 0) {
-            /* Distribuição striped: (1, 2, ..., p, 1, 2, ..., p) */
             printf("[PRODUZ PID %d] Distribuição striped em %d filas de mensagens\n", meu_pid, p_total);
-            for (int i = 0; i < n_msgs; i++) {
-                int fila_destino = (i % p_total) + 1;
-                mensagem_t msg;
-                msg.mtype = 1;
-                msg.pid_produtor = meu_pid;
-                msg.seq = i + 1;
+        } else {
+            printf("[PRODUZ PID %d] Enviando %d mensagens para fila %d\n", meu_pid, n_msgs, p_prod);
+        }
+
+        for (int i = 0; i < n_msgs && !terminar_processo; i++) {
+            /* Distribuição striped: (1, 2, ..., p, 1, 2, ..., p) */
+            int fila_destino = (p_prod == 0) ? (i % p_total) + 1 : p_prod;
+            mensagem_t msg;
+            msg.mtype = 1;
+            msg.pid_produtor = meu_pid;
+            msg.seq = i + 1;
+            msg.ack = ack;
+            msg.ack_id = ack_id;
+
+            /* O tempo de envio é registrado imediatamente antes de cada tentativa;
+             * com a fila cheia, o msgsnd espera por espaço */
+            int enviada;
+            do {
                 gettimeofday(&msg.tempo_envio, NULL);
-                snprintf(msg.dados, sizeof(msg.dados), "Msg %lu do produtor %d", msg.seq, meu_pid);
-                
-                int msgid = obter_fila_mensagem(fila_destino);
-                if (msgid == -1) {
-                    printf("Erro - fila %d nao existe\n", fila_destino);
-                    continue;
-                }
-                
-                if (msgsnd(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0) == -1) {
+                enviada = msgsnd(ids_a[fila_destino - 1], &msg, sizeof(mensagem_t) - sizeof(long), 0);
+            } while (enviada == -1 && errno == EINTR && !terminar_processo);
+            if (enviada == -1) {
+                if (!terminar_processo) {
                     perror("msgsnd");
-                } else {
-                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d | pid_prod=%d | seq=%lu\n", 
-                           meu_pid, msg.seq, fila_destino, msg.pid_produtor, msg.seq);
-                    total_enviadas++;
+                    falhou = 1;
                 }
+                break;
             }
-            printf("[PRODUZ PID %d] Total de %lu mensagens enviadas com distribuição striped\n", 
+            printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d | pid_prod=%d | seq=%lu\n",
+                   meu_pid, msg.seq, fila_destino, msg.pid_produtor, msg.seq);
+            total_enviadas++;
+        }
+
+        if (p_prod == 0) {
+            printf("[PRODUZ PID %d] Total de %lu mensagens enviadas com distribuição striped\n",
                    meu_pid, total_enviadas);
         } else {
-            /* Enviar para fila específica */
-            int msgid = obter_fila_mensagem(p_prod);
-            if (msgid == -1) {
-                printf("Erro - fila %d nao existe\n", p_prod);
-                gettimeofday(&tempo_fim, NULL);
-                printf("[PRODUZ PID %d] Finalizado. Tempo de execução: ", meu_pid);
-                imprimir_tempo(&tempo_inicio, &tempo_fim);
-                exit(EXIT_FAILURE);
-            }
-            
-            printf("[PRODUZ PID %d] Enviando %d mensagens para fila %d\n", meu_pid, n_msgs, p_prod);
-            for (int i = 0; i < n_msgs; i++) {
-                mensagem_t msg;
-                msg.mtype = 1;
-                msg.pid_produtor = meu_pid;
-                msg.seq = i + 1;
-                gettimeofday(&msg.tempo_envio, NULL);
-                snprintf(msg.dados, sizeof(msg.dados), "Msg %lu do produtor %d", msg.seq, meu_pid);
-                
-                if (msgsnd(msgid, &msg, sizeof(mensagem_t) - sizeof(long), 0) == -1) {
-                    perror("msgsnd");
-                } else {
-                    printf("[PRODUZ PID %d] Mensagem %lu enviada para fila %d | pid_prod=%d | seq=%lu\n", 
-                           meu_pid, msg.seq, p_prod, msg.pid_produtor, msg.seq);
-                    total_enviadas++;
-                }
-            }
-            printf("[PRODUZ PID %d] Total de %lu mensagens enviadas para fila %d\n", 
+            printf("[PRODUZ PID %d] Total de %lu mensagens enviadas para fila %d\n",
                    meu_pid, total_enviadas, p_prod);
         }
-        
-        if (ack == ACK_WAIT) {
-            printf("[PRODUZ PID %d] ack=1: aguardando confirmação de que TODAS as %lu mensagens foram consumidas...\n", 
+
+        if (ack == ACK_WAIT && !terminar_processo) {
+            printf("[PRODUZ PID %d] ack=1: aguardando confirmação de que TODAS as %lu mensagens foram consumidas...\n",
                    meu_pid, total_enviadas);
-            int ack_msgid = -1;
-            if (p_prod == 0) {
-                for (int j = 1; j <= p_total; j++) {
-                    ack_msgid = obter_fila_ack(j);
-                    if (ack_msgid != -1) break;
+            /* Os consumidores mantêm na fila de confirmações um contador por produtor
+             * (mtype = número do produtor): cada mensagem consumida incrementa o
+             * contador que estiver na fila ou cria um novo. O produtor soma os
+             * contadores que recebe até atingir o total enviado. */
+            unsigned long confirmadas = 0;
+            while (confirmadas < total_enviadas) {
+                contador_msg_t c;
+                if (msgrcv(fila_ack, &c, sizeof(c) - sizeof(long), ack_id, 0) == -1) {
+                    if (errno == EINTR && !terminar_processo) continue;
+                    if (!terminar_processo) perror("msgrcv confirmação");
+                    break;
                 }
-            } else {
-                ack_msgid = obter_fila_ack(p_prod);
+                confirmadas += c.quantidade;
+                printf("[PRODUZ PID %d] Confirmação recebida: +%d mensagens consumidas (total: %lu/%lu)\n",
+                       meu_pid, c.quantidade, confirmadas, total_enviadas);
             }
-            if (ack_msgid != -1 && total_enviadas > 0) {
-                ack_msg_t ack_msg;
-                /* Aguardar confirmação para todas as mensagens enviadas */
-                unsigned long confirmadas = 0;
-                while (confirmadas < total_enviadas) {
-                    if (msgrcv(ack_msgid, &ack_msg, sizeof(ack_msg_t) - sizeof(long), meu_pid, 0) == -1) {
-                        if (errno == EINTR) continue;
-                        perror("msgrcv ack");
-                        break;
-                    }
-                    confirmadas += ack_msg.mensagens_consumidas;
-                    printf("[PRODUZ PID %d] Confirmação recebida: %lu mensagens consumidas (total: %lu/%lu)\n", 
-                           meu_pid, ack_msg.mensagens_consumidas, confirmadas, total_enviadas);
-                }
+            if (confirmadas == total_enviadas) {
                 printf("[PRODUZ PID %d] TODAS as mensagens foram consumidas. Confirmação completa!\n", meu_pid);
-            } else {
-                /* Se não conseguir fila de ack, aguarda um tempo */
-                sleep(3);
-                printf("[PRODUZ PID %d] Aguardando confirmação (modo simplificado)...\n", meu_pid);
+            } else if (!terminar_processo) {
+                printf("[PRODUZ PID %d] Erro: apenas %lu de %lu mensagens confirmadas\n",
+                       meu_pid, confirmadas, total_enviadas);
+                falhou = 1;
             }
-        } else {
+        } else if (ack != ACK_WAIT) {
             printf("[PRODUZ PID %d] ack=2: não aguardando confirmação\n", meu_pid);
         }
-        
+
     } else if (paradigma == PARADIGMA_SHM) {
         if (p_prod == 0) {
-            /* Distribuição striped em memórias compartilhadas */
             printf("[PRODUZ PID %d] Distribuição striped em %d memórias compartilhadas\n", meu_pid, p_total);
-            for (int i = 0; i < n_msgs; i++) {
-                int shm_destino = (i % p_total) + 1;
-                key_t key;
-                FILE *f = fopen(SHM_KEY_FILE, "a");
-                if (f) fclose(f);
-                key = ftok(SHM_KEY_FILE, shm_destino);
-                int shmid = shmget(key, SHM_SIZE, 0666);
-                if (shmid == -1) {
-                    printf("Erro - estrutura %d nao existe\n", shm_destino);
-                    continue;
-                }
-                void *addr = shmat(shmid, NULL, 0);
-                if (addr == (void *)-1) {
-                    perror("shmat");
-                    continue;
-                }
-                
-                FILE *sf = fopen(SEM_KEY_FILE, "a");
-                if (sf) fclose(sf);
-                key_t skey = ftok(SEM_KEY_FILE, shm_destino);
-                int semid = semget(skey, 3, 0666);
-                
-                if (semid != -1) {
-                    sem_p(semid, 1);
-                    sem_p(semid, 0);
-                }
-                
-                shm_header_t *hdr = (shm_header_t *)addr;
-                if (hdr->count < hdr->capacidade) {
-                    mensagem_t *buf = (mensagem_t *)(addr + sizeof(shm_header_t));
-                    int idx = hdr->cabeca;
-                    buf[idx].mtype = 1;
-                    buf[idx].pid_produtor = meu_pid;
-                    buf[idx].seq = i + 1;
-                    gettimeofday(&buf[idx].tempo_envio, NULL);
-                    snprintf(buf[idx].dados, sizeof(buf[idx].dados), "Msg %lu do produtor %d", buf[idx].seq, meu_pid);
-                    
-                    hdr->cabeca = (hdr->cabeca + 1) % hdr->capacidade;
-                    hdr->count++;
-                    hdr->total_produzidas++;
-                    
-                    printf("[PRODUZ PID %d] Mensagem %lu inserida na memória %d | pid_prod=%d | seq=%lu\n", 
-                           meu_pid, buf[idx].seq, shm_destino, meu_pid, buf[idx].seq);
-                    total_enviadas++;
-                } else {
-                    printf("[PRODUZ PID %d] Buffer cheio na memória %d\n", meu_pid, shm_destino);
-                }
-                
-                if (semid != -1) {
-                    sem_v(semid, 0);
-                    sem_v(semid, 2);
-                }
-                
-                shmdt(addr);
-            }
-            printf("[PRODUZ PID %d] Total de %lu mensagens enviadas com distribuição striped\n", 
-                   meu_pid, total_enviadas);
         } else {
-            /* Enviar para memória compartilhada específica */
-            key_t key;
-            FILE *f = fopen(SHM_KEY_FILE, "a");
-            if (f) fclose(f);
-            key = ftok(SHM_KEY_FILE, p_prod);
-            int shmid = shmget(key, SHM_SIZE, 0666);
-            if (shmid == -1) {
-                printf("Erro - estrutura %d nao existe\n", p_prod);
-                gettimeofday(&tempo_fim, NULL);
-                printf("[PRODUZ PID %d] Finalizado. Tempo de execução: ", meu_pid);
-                imprimir_tempo(&tempo_inicio, &tempo_fim);
-                exit(EXIT_FAILURE);
-            }
-            
-            void *addr = shmat(shmid, NULL, 0);
-            if (addr == (void *)-1) {
-                perror("shmat");
-                gettimeofday(&tempo_fim, NULL);
-                printf("[PRODUZ PID %d] Finalizado. Tempo de execução: ", meu_pid);
-                imprimir_tempo(&tempo_inicio, &tempo_fim);
-                exit(EXIT_FAILURE);
-            }
-            
-            FILE *sf = fopen(SEM_KEY_FILE, "a");
-            if (sf) fclose(sf);
-            key_t skey = ftok(SEM_KEY_FILE, p_prod);
-            int semid = semget(skey, 3, 0666);
-            
-            printf("[PRODUZ PID %d] Enviando %d mensagens para memória compartilhada %d\n", 
+            printf("[PRODUZ PID %d] Enviando %d mensagens para memória compartilhada %d\n",
                    meu_pid, n_msgs, p_prod);
-            
-            for (int i = 0; i < n_msgs; i++) {
-                if (semid != -1) {
-                    sem_p(semid, 1);
-                    sem_p(semid, 0);
+        }
+
+        for (int i = 0; i < n_msgs && !terminar_processo; i++) {
+            /* Distribuição striped: (1, 2, ..., p, 1, 2, ..., p) */
+            int shm_destino = (p_prod == 0) ? (i % p_total) + 1 : p_prod;
+            int e = shm_destino - 1;
+            int semid = ids_b[e];
+
+            if (enderecos[e] == NULL && anexar_segmento_shm(ids_a[e], &enderecos[e]) == -1) {
+                enderecos[e] = NULL;
+                falhou = 1;
+                break;
+            }
+
+            /* Espera uma posição livre e entra na região crítica numa única operação
+             * atômica. O mutex usa SEM_UNDO: se o processo morrer dentro da região
+             * crítica, o kernel o libera e a estrutura não fica travada. */
+            struct sembuf entrar[2] = {
+                { .sem_num = SEM_VAZIO, .sem_op = -1, .sem_flg = 0 },
+                { .sem_num = SEM_MUTEX, .sem_op = -1, .sem_flg = SEM_UNDO }
+            };
+            struct sembuf sair[2] = {
+                { .sem_num = SEM_MUTEX, .sem_op = 1, .sem_flg = SEM_UNDO },
+                { .sem_num = SEM_CHEIO, .sem_op = 1, .sem_flg = 0 }
+            };
+            if (sem_ops(semid, entrar, 2) == -1) {
+                if (!terminar_processo) {
+                    perror("semop");
+                    falhou = 1;
                 }
-                
-                shm_header_t *hdr = (shm_header_t *)addr;
-                mensagem_t *buf = (mensagem_t *)(addr + sizeof(shm_header_t));
-                
-                if (hdr->count >= hdr->capacidade) {
-                    if (semid != -1) {
-                        sem_v(semid, 0);
-                        sem_v(semid, 1);
-                    }
-                    /* Aguardar espaço */
-                    if (semid != -1) {
-                        sem_p(semid, 1);
-                        sem_p(semid, 0);
-                    }
-                    hdr = (shm_header_t *)addr;
-                    buf = (mensagem_t *)(addr + sizeof(shm_header_t));
+                break;
+            }
+
+            shm_header_t *hdr = (shm_header_t *)enderecos[e];
+            mensagem_t *buf = (mensagem_t *)((char *)enderecos[e] + sizeof(shm_header_t));
+            mensagem_t *msg = &buf[hdr->cabeca];
+            msg->mtype = 1;
+            msg->pid_produtor = meu_pid;
+            msg->seq = i + 1;
+            msg->ack = ack;
+            msg->ack_id = ack_id;
+            gettimeofday(&msg->tempo_envio, NULL);
+
+            hdr->cabeca = (hdr->cabeca + 1) % hdr->capacidade;
+            hdr->count++;
+            hdr->total_produzidas++;
+
+            if (sem_ops(semid, sair, 2) == -1) {
+                perror("semop");
+                falhou = 1;
+                break;
+            }
+
+            /* Impressão fora da região crítica */
+            printf("[PRODUZ PID %d] Mensagem %d inserida na memória %d | pid_prod=%d | seq=%d\n",
+                   meu_pid, i + 1, shm_destino, meu_pid, i + 1);
+            total_enviadas++;
+        }
+
+        if (p_prod == 0) {
+            printf("[PRODUZ PID %d] Total de %lu mensagens enviadas com distribuição striped\n",
+                   meu_pid, total_enviadas);
+        }
+
+        if (ack == ACK_WAIT && !terminar_processo) {
+            printf("[PRODUZ PID %d] ack=1: aguardando confirmação de que TODAS as %lu mensagens foram consumidas...\n",
+                   meu_pid, total_enviadas);
+            if (ack_id == -1) {
+                printf("[PRODUZ PID %d] Erro: semáforo de confirmação ausente\n", meu_pid);
+                falhou = 1;
+            } else if (total_enviadas > 0) {
+                /* Bloqueia até o semáforo atingir total_enviadas confirmações */
+                struct sembuf op;
+                int confirmado;
+                op.sem_num = 0;
+                op.sem_op = -(short)total_enviadas;
+                op.sem_flg = 0;
+                while ((confirmado = semop(ack_id, &op, 1)) == -1 && errno == EINTR &&
+                       !terminar_processo) {
                 }
-                
-                int idx = hdr->cabeca;
-                buf[idx].mtype = 1;
-                buf[idx].pid_produtor = meu_pid;
-                buf[idx].seq = i + 1;
-                gettimeofday(&buf[idx].tempo_envio, NULL);
-                snprintf(buf[idx].dados, sizeof(buf[idx].dados), "Msg %lu do produtor %d", buf[idx].seq, meu_pid);
-                
-                hdr->cabeca = (hdr->cabeca + 1) % hdr->capacidade;
-                hdr->count++;
-                hdr->total_produzidas++;
-                
-                printf("[PRODUZ PID %d] Mensagem %lu inserida na memória %d | pid_prod=%d | seq=%lu\n", 
-                       meu_pid, buf[idx].seq, p_prod, meu_pid, buf[idx].seq);
-                total_enviadas++;
-                
-                if (semid != -1) {
-                    sem_v(semid, 0);
-                    sem_v(semid, 2);
+                if (confirmado == 0) {
+                    printf("[PRODUZ PID %d] TODAS as mensagens foram consumidas. Confirmação completa!\n", meu_pid);
+                } else if (!terminar_processo) {
+                    perror("semop ack");
+                    falhou = 1;
                 }
             }
-            
-            if (ack == ACK_WAIT) {
-                printf("[PRODUZ PID %d] ack=1: aguardando confirmação de que TODAS as %lu mensagens foram consumidas...\n", 
-                       meu_pid, total_enviadas);
-                /* Aguardar até que todas as mensagens sejam consumidas */
-                while (1) {
-                    if (semid != -1) {
-                        sem_p(semid, 0);
-                    }
-                    shm_header_t *hdr_check = (shm_header_t *)addr;
-                    if (hdr_check->total_consumidas >= total_enviadas) {
-                        if (semid != -1) {
-                            sem_v(semid, 0);
-                        }
-                        break;
-                    }
-                    if (semid != -1) {
-                        sem_v(semid, 0);
-                    }
-                    usleep(50000);
-                }
-                printf("[PRODUZ PID %d] TODAS as mensagens foram consumidas. Confirmação completa!\n", meu_pid);
-            } else {
-                printf("[PRODUZ PID %d] ack=2: não aguardando confirmação\n", meu_pid);
-            }
-            
-            shmdt(addr);
+        } else if (ack != ACK_WAIT) {
+            printf("[PRODUZ PID %d] ack=2: não aguardando confirmação\n", meu_pid);
         }
     }
-    
-    gettimeofday(&tempo_fim, NULL);
-    printf("[PRODUZ PID %d] Finalizado. Tempo de execução: ", meu_pid);
-    imprimir_tempo(&tempo_inicio, &tempo_fim);
-    
-    return 0;
+
+    finalizar_processo("PRODUZ", &tempo_inicio, falhou ? EXIT_FAILURE : EXIT_SUCCESS);
 }

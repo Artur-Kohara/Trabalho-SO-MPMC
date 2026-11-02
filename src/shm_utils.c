@@ -1,40 +1,11 @@
 #include "shm_utils.h"
 
-int criar_segmento_shm(int index) {
-    key_t key;
-    int shmid;
-    FILE *f;
-    
-    /* Cria arquivo para ftok se não existir */
-    f = fopen(SHM_KEY_FILE, "a");
-    if (f == NULL) {
-        perror("fopen shm");
-        return -1;
-    }
-    fclose(f);
-    
-    key = ftok(SHM_KEY_FILE, index);
-    if (key == -1) {
-        perror("ftok shm");
-        return -1;
-    }
-    
-    /* Cria segmento de memória compartilhada de 2048 bytes */
-    shmid = shmget(key, SHM_SIZE, IPC_CREAT | IPC_EXCL | 0666);
+/* Cria um segmento privado; o identificador é repassado aos filhos */
+int criar_segmento_shm(size_t tamanho) {
+    int shmid = shmget(IPC_PRIVATE, tamanho, IPC_CREAT | IPC_PERMS);
     if (shmid == -1) {
-        if (errno == EEXIST) {
-            /* Se já existe, tenta obter */
-            shmid = shmget(key, SHM_SIZE, 0666);
-            if (shmid == -1) {
-                perror("shmget existente");
-                return -1;
-            }
-        } else {
-            perror("shmget");
-            return -1;
-        }
+        perror("shmget");
     }
-    
     return shmid;
 }
 
@@ -63,39 +34,12 @@ void remover_segmento_shm(int shmid) {
     }
 }
 
-int criar_semaforos_shm(int index) {
-    key_t key;
-    int semid;
-    FILE *f;
-    
-    f = fopen(SEM_KEY_FILE, "a");
-    if (f == NULL) {
-        perror("fopen sem");
-        return -1;
-    }
-    fclose(f);
-    
-    key = ftok(SEM_KEY_FILE, index);
-    if (key == -1) {
-        perror("ftok sem");
-        return -1;
-    }
-    
-    /* Cria conjunto de 3 semáforos: 0=mutex, 1=vazio, 2=cheio */
-    semid = semget(key, 3, IPC_CREAT | IPC_EXCL | 0666);
+/* Cria um conjunto privado de nsems semáforos */
+int criar_semaforos(int nsems) {
+    int semid = semget(IPC_PRIVATE, nsems, IPC_CREAT | IPC_PERMS);
     if (semid == -1) {
-        if (errno == EEXIST) {
-            semid = semget(key, 3, 0666);
-            if (semid == -1) {
-                perror("semget existente");
-                return -1;
-            }
-        } else {
-            perror("semget");
-            return -1;
-        }
+        perror("semget");
     }
-    
     return semid;
 }
 
@@ -116,7 +60,7 @@ void inicializar_semaforos(int semid, int capacidade) {
     }
 }
 
-void remover_semaforos_shm(int semid) {
+void remover_semaforos(int semid) {
     if (semid != -1) {
         if (semctl(semid, 0, IPC_RMID) == -1) {
             perror("semctl IPC_RMID");
@@ -124,26 +68,13 @@ void remover_semaforos_shm(int semid) {
     }
 }
 
-void sem_p(int semid, int sem_num) {
-    struct sembuf op;
-    op.sem_num = sem_num;
-    op.sem_op = -1;
-    op.sem_flg = 0;
-    while (semop(semid, &op, 1) == -1) {
-        if (errno == EINTR) continue;
-        perror("semop P");
-        break;
+/* Executa as operações de forma atômica, repetindo se interrompida por um sinal
+ * que não seja de término. Em caso de erro, errno indica a causa (EAGAIN quando
+ * uma operação com IPC_NOWAIT não pôde ser feita). */
+int sem_ops(int semid, struct sembuf *ops, size_t n) {
+    while (semop(semid, ops, n) == -1) {
+        if (errno == EINTR && !terminar_processo) continue;
+        return -1;
     }
-}
-
-void sem_v(int semid, int sem_num) {
-    struct sembuf op;
-    op.sem_num = sem_num;
-    op.sem_op = 1;
-    op.sem_flg = 0;
-    while (semop(semid, &op, 1) == -1) {
-        if (errno == EINTR) continue;
-        perror("semop V");
-        break;
-    }
+    return 0;
 }
