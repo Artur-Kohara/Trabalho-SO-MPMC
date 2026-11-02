@@ -14,6 +14,11 @@ typedef struct {
     int iniciado;              /* flag para inicialização */
 } shm_header_t;
 
+/* Semáforos de cada segmento */
+#define SEM_MUTEX 0   /* exclusão mútua no buffer */
+#define SEM_VAZIO 1   /* posições livres */
+#define SEM_CHEIO 2   /* mensagens disponíveis */
+
 /* Operações com semáforos */
 union semun {
     int val;
@@ -22,17 +27,16 @@ union semun {
     struct seminfo *__buf;
 };
 
-int criar_segmento_shm(int index);
+int criar_segmento_shm(size_t tamanho);
 int anexar_segmento_shm(int shmid, void **addr);
 void desanexar_segmento_shm(void *addr);
 void remover_segmento_shm(int shmid);
 
-int criar_semaforos_shm(int index);
+int criar_semaforos(int nsems);
 void inicializar_semaforos(int semid, int capacidade);
-void remover_semaforos_shm(int semid);
+void remover_semaforos(int semid);
 
-/* Operações P/V (wait/signal) */
-void sem_p(int semid, int sem_num);
-void sem_v(int semid, int sem_num);
+/* Operações sobre um conjunto de semáforos, executadas de forma atômica */
+int sem_ops(int semid, struct sembuf *ops, size_t n);
 
 #endif

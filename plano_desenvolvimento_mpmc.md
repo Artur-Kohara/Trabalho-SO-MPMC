@@ -4,6 +4,10 @@
 **Período:** 02/2026  
 **Professora:** Alba Melo  
 
+> Documento de planejamento elaborado antes da implementação. As etapas abaixo
+> foram concluídas; o funcionamento final e as decisões de projeto (mecanismo ACK,
+> recursos IPC, sinais e testes) estão descritos no `README.md`.
+
 ## 1. Objetivo
 
 Desenvolver um sistema com múltiplos produtores e múltiplos consumidores (MPMC) com dois paradigmas de comunicação entre processos:
@@ -286,78 +290,78 @@ Trabalho/
 ## 9. Plano de Implementação por Etapas
 
 ### Etapa 1: Preparação e estrutura base
-- [ ] **Ler e analisar** completamente o enunciado (feito)
-- [ ] **Criar estrutura de diretórios** (`include/`, `src/`, `bin/`)
-- [ ] **Definir headers comuns**: estruturas de mensagem, constantes, protótipos
-- [ ] **Criar Makefile** básico para compilar `mpmc`, `produz`, `consome`
+- [x] **Ler e analisar** completamente o enunciado (feito)
+- [x] **Criar estrutura de diretórios** (`include/`, `src/`, `bin/`)
+- [x] **Definir headers comuns**: estruturas de mensagem, constantes, protótipos
+- [x] **Criar Makefile** básico para compilar `mpmc`, `produz`, `consome`
 
 **Critério de aceite:** Compilação sem erros com estrutura vazia
 
 ### Etapa 2: Implementação do processo `mpmc` (shell)
-- [ ] **Parser de linha**: ler input, split por espaços
-- [ ] **Comando `produz`**: parsear `p_prod n_msgs ack`, validar
-- [ ] **Comando `consome`**: parsear `p_prod n_msgs ack`, validar
-- [ ] **Comando `shutdown`**: implementar lógica
-- [ ] **Criação de filhos**: `fork()` + `exec()` para `produz`/`consome`
-- [ ] **Loop interativo** com prompt `>>`
+- [x] **Parser de linha**: ler input, split por espaços
+- [x] **Comando `produz`**: parsear `p_prod n_msgs ack`, validar
+- [x] **Comando `consome`**: parsear `p_prod n_msgs ack`, validar
+- [x] **Comando `shutdown`**: implementar lógica
+- [x] **Criação de filhos**: `fork()` + `exec()` para `produz`/`consome`
+- [x] **Loop interativo** com prompt `>>`
 
 **Critério de aceite:** Shell reconhece comandos, cria processos (ainda sem IPC funcional)
 
 ### Etapa 3: Suporte a IPC - Paradigma 2 (Troca de Mensagens) - mais simples inicialmente
 Recomendado começar por **troca de mensagens** (menos complicado para sincronização inicial).
 
-- [ ] **Criar filas**: `msgget` com chave única por estrutura
-- [ ] **Definir estrutura `mensagem_t`** com `mtype`, `pid_produtor`, `seq`, `tempo_envio`
-- [ ] **Implementar `produz.c`**: enviar mensagens com `msgsnd`
-- [ ] **Implementar `consome.c`**: receber mensagens with `msgrcv`
-- [ ] **Distribuição striped** quando `p_prod == 0`
-- [ ] **Tratamento de erros**: estrutura inexistente
+- [x] **Criar filas**: `msgget` com chave única por estrutura
+- [x] **Definir estrutura `mensagem_t`** com `mtype`, `pid_produtor`, `seq`, `tempo_envio`
+- [x] **Implementar `produz.c`**: enviar mensagens com `msgsnd`
+- [x] **Implementar `consome.c`**: receber mensagens with `msgrcv`
+- [x] **Distribuição striped** quando `p_prod == 0`
+- [x] **Tratamento de erros**: estrutura inexistente
 
 **Critério de aceite:** `mpmc 2 2`, `produz 2 5 2`, `consome 2 2 1`, funcionar (sem ack complexo ainda)
 
 ### Etapa 4: Suporte a IPC - Paradigma 1 (Memória Compartilhada)
-- [ ] **Criar segmentos shm**: `shmget` + `shmat`, tamanho 2048 bytes
-- [ ] **Criar semáforos**: System V semaphores para mutex, vazio/cheio
-- [ ] **Implementar buffer circular** dentro do segmento
-- [tag] [ ] **Adaptar `produz.c` / `consome.c` para shm**
-- [ ] **Calcular espaço** necessário dentro de 2048 bytes
+- [x] **Criar segmentos shm**: `shmget` + `shmat`, tamanho 2048 bytes
+- [x] **Criar semáforos**: System V semaphores para mutex, vazio/cheio
+- [x] **Implementar buffer circular** dentro do segmento
+- [x] **Adaptar `produz.c` / `consome.c` para shm**
+- [x] **Calcular espaço** necessário dentro de 2048 bytes
 
 **Critério de aceite:** Funcionar com paradigma 1 para casos simples
 
 ### Etapa 5: Sincronização e mecanismo de ACK
-- [ ] **ACK=2 (não bloqueante)**: comportamento conforme exemplos
-- [ ] **ACK=1 (bloqueante): produtor espera todas consumidas**
+- [x] **ACK=2 (não bloqueante)**: comportamento conforme exemplos
+- [x] **ACK=1 (bloqueante): produtor espera todas consumidas**
   - Para **msg**: criar canal de confirmação (fila adicional ou mensagem de ack). Consumidor envia confirmação após consumir mensagem (ou após completar lote)
   - Para **shm**: usar semáforos ou contador compartilhado + variáveis condicionais/semáforos
-- [ ] **Consumidor bloqueado**: se ack==1 e menos mensagens, ficar bloqueado. se ack==2, erro e retornar número consumidas
-- [ ] **Confirmação de consumo**: garantir produtor só desbloqueia quando **todas** mensagens produzidas foram consumidas
+- [x] **Consumidor bloqueado**: se ack==1 e menos mensagens, ficar bloqueado. se ack==2, erro e retornar número consumidas
+- [x] **Confirmação de consumo**: garantir produtor só desbloqueia quando **todas** mensagens produzidas foram consumidas
 
 **Critério de aceite:** Exemplos 3.1, 3.2, 3.3 atendem semântica de ack
 
 ### Etapa 6: Distribuição striped e validações
-- [ ] **Striped**: `produz 0 15 2` → distribuir 15 mensagens para 5 estruturas (3 por fila), ciclo 1..p
-- [ ] **Validação de estrutura inexistente**: retornar erro "fila 3 nao existe" (ou similar)
-- [tag] [ ] **Limites**: n_msgs 1-1024
+- [x] **Striped**: `produz 0 15 2` → distribuir 15 mensagens para 5 estruturas (3 por fila), ciclo 1..p
+- [x] **Validação de estrutura inexistente**: retornar erro "fila 3 nao existe" (ou similar)
+- [x] **Limites**: n_msgs 1-1024
 
 **Critério de aceite:** Exemplo 3.3 funciona
 
 ### Etapa 7: Shutdown, tempo de execução e limpeza
-- [ ] **Coletar tempo de execução de processos**: registrar timestamps antes/durante/finalização. Usar `waitpid` + opcional `gettimeofday`/`clock_gettime`, também pode trazer info via arquivo temporário
-- [ ] **Terminar processos ativos**: enviar `SIGTERM` (e eventualmente `SIGKILL`)
-- [ ] **Deletar IPCs**: `shmctl(IPC_RMID)`, `semctl(IPC_RMID), `msgctl(IPC_RMID)`
-- [ ] **Imprimir contadores por estrutura**: "número total de mensagens consumidas em cada estrutura p"
-- [ ] **Imprimir tempo de operação do `mpmc`**: calcular diferença entre início e shutdown
-- [ ] **Limpeza de recursos**
+- [x] **Coletar tempo de execução de processos**: registrar timestamps antes/durante/finalização. Usar `waitpid` + opcional `gettimeofday`/`clock_gettime`, também pode trazer info via arquivo temporário
+- [x] **Terminar processos ativos**: enviar `SIGTERM` (e eventualmente `SIGKILL`)
+- [x] **Deletar IPCs**: `shmctl(IPC_RMID)`, `semctl(IPC_RMID), `msgctl(IPC_RMID)`
+- [x] **Imprimir contadores por estrutura**: "número total de mensagens consumidas em cada estrutura p"
+- [x] **Imprimir tempo de operação do `mpmc`**: calcular diferença entre início e shutdown
+- [x] **Limpeza de recursos**
 
 **Critério de aceite:** `shutdown` limpa tudo corretamente, imprime informações solicitadas
 
 ### Etapa 8: Testes, debug e ajustes
-- [ ] **Testar Exemplo 3.1** (shm)
-- [ ] **Testar Exemplo 3.2** (msg)
-- [ ] **Testar Exemplo 3.3** (msg, striped)
-- [ ] **Casos extremos**: n_msgs=1, ack=2 com menos mensagens, múltiplos consumidores simultâneos
-- [ ] **Concorrência**: verificar que `mpmc` volta ao prompt `>>` imediatamente após criar filhos
-- [ ] **Validação de memória**: garantir segmento 2048 bytes para shm
+- [x] **Testar Exemplo 3.1** (shm)
+- [x] **Testar Exemplo 3.2** (msg)
+- [x] **Testar Exemplo 3.3** (msg, striped)
+- [x] **Casos extremos**: n_msgs=1, ack=2 com menos mensagens, múltiplos consumidores simultâneos
+- [x] **Concorrência**: verificar que `mpmc` volta ao prompt `>>` imediatamente após criar filhos
+- [x] **Validação de memória**: garantir segmento 2048 bytes para shm
 
 **Critério de aceite:** Todos os exemplos rodam conforme descrito
 
@@ -374,6 +378,10 @@ Recomendo **argumentos da linha de comando** por simplicidade.
 ### 10.2. Chaves IPC
 Para evitar colisões, usar `ftok()` com um arquivo único (pode ser o próprio executável ou `/tmp/mpmc_key`).
 
+> Na implementação final, os recursos são criados com `IPC_PRIVATE` e os
+> identificadores são repassados aos filhos pela linha de comando, o que evita
+> colisões de `ftok` entre execuções (ver `README.md`).
+
 ### 10.3. Tempo de execução
 - Para **processos filhos**: gravar `clock_gettime(CLOCK_MONOTONIC)` no início/fim de `produz.c`/`consome.c` e imprimir no término. Ou usar `gettimeofday`.
 - Para **mpmc**: gravar no início e imprimir no `shutdown`.
@@ -389,19 +397,19 @@ Exemplo 3.2: `>>>> retorna erro – fila 3 nao existe` (o `>>` aparece múltiplo
 
 ## 11. Checklist Final
 
-- [ ] Compila com `make` sem warnings críticos
-- [ ] Suporta ambos paradigmas (`1` e `2`)
-- [ ] Comandos `produz`, `consome`, `shutdown` funcionam
-- [ ] Distribuição striped com `p_prod == 0`
-- [ ] Validação de estrutura inexistente
-- [ ] Ack=1 bloqueia corretamente, ack=2 não bloqueia
-- [ ] Consumidor com ack=2 e menos mensagens retorna erro com número consumido
-- [ ] Produtor com ack=1 espera todas consumidas
-- [ ] Tamanho shm = 2048 bytes
-- [ ] Usa shm+sem no paradigma 1, msg no paradigma 2
-- [ ] Sinais Unix podem ser usados quando apropriado
-- [ ] Shutdown termina tudo, limpa IPCs, imprime tempos e contadores
-- [ ] Exemplos 3.1, 3.2, 3.3 reproduzíveis
+- [x] Compila com `make` sem warnings críticos
+- [x] Suporta ambos paradigmas (`1` e `2`)
+- [x] Comandos `produz`, `consome`, `shutdown` funcionam
+- [x] Distribuição striped com `p_prod == 0`
+- [x] Validação de estrutura inexistente
+- [x] Ack=1 bloqueia corretamente, ack=2 não bloqueia
+- [x] Consumidor com ack=2 e menos mensagens retorna erro com número consumido
+- [x] Produtor com ack=1 espera todas consumidas
+- [x] Tamanho shm = 2048 bytes
+- [x] Usa shm+sem no paradigma 1, msg no paradigma 2
+- [x] Sinais Unix podem ser usados quando apropriado
+- [x] Shutdown termina tudo, limpa IPCs, imprime tempos e contadores
+- [x] Exemplos 3.1, 3.2, 3.3 reproduzíveis
 
 ## 12. Cronograma Sugerido
 

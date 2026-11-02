@@ -5,7 +5,7 @@ LDFLAGS =
 SRCDIR = src
 INCDIR = include
 
-SOURCES_MPMC = $(SRCDIR)/mpmc.c $(SRCDIR)/common.c $(SRCDIR)/shm_utils.c $(SRCDIR)/msg_utils.c
+SOURCES_MPMC = $(SRCDIR)/mpmc.c $(SRCDIR)/registro.c $(SRCDIR)/common.c $(SRCDIR)/shm_utils.c $(SRCDIR)/msg_utils.c
 SOURCES_PRODUZ = $(SRCDIR)/produz.c $(SRCDIR)/common.c $(SRCDIR)/shm_utils.c $(SRCDIR)/msg_utils.c
 SOURCES_CONSOME = $(SRCDIR)/consome.c $(SRCDIR)/common.c $(SRCDIR)/shm_utils.c $(SRCDIR)/msg_utils.c
 
@@ -32,7 +32,10 @@ $(SRCDIR)/%.o: $(SRCDIR)/%.c $(INCDIR)/*.h
 clean:
 	rm -f $(SRCDIR)/*.o $(TARGETS) *~
 
+# Sobras de execuções interrompidas são removidas automaticamente pelo próximo mpmc
 distclean: clean
-	rm -f /tmp/mpmc_*_key
 
-.PHONY: all clean distclean
+test: all
+	./tests/testes.sh
+
+.PHONY: all clean distclean test
