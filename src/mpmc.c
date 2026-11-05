@@ -822,7 +822,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        mostrar_prompt = 1;
+        // mostrar_prompt = 1;
         if (fgets(linha, sizeof(linha), stdin) == NULL) {
             /* EOF na entrada: encerra liberando os recursos */
             printf("\nFim da entrada.\n");
@@ -838,6 +838,10 @@ int main(int argc, char *argv[]) {
             continue;
         }
         processar_linha(linha);
+        /* Correção para mostrar o prompt (">>") apenas quando todos os logs do processo filho
+        solicitado forem exibindos na tela, evitando race condition entre as saídas*/
+        aguardar_estabilidade();
+        mostrar_prompt = 1;
     }
 
     return 0;
