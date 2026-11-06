@@ -602,6 +602,85 @@ static void comando_consome(char *args[]) {
     printf("Processo consome (PID %d) criado.\n", pid);
 }
 
+/* Exibe a tabela de processos interna com 
+as informações mais relevantes */
+
+static void comando_ps(void) {
+    int i;
+    uid_t uid = getuid();
+    struct timespec agora_ts;
+    struct rusage uso_mpmc;
+    struct timeval cpu_pai;
+    char duracao[32], cmd[64], detalhe[64];
+
+    /* Atualiza o estado dos filhos que já terminaram antes de exibir a tabela */
+    processar_eventos();
+    agora(&agora_ts);
+
+    printf("\n%-6s %-7s %-7s %-12s %-10s %-10s %-20s %s\n",
+           "UID", "PID", "PPID", "ESTADO", "CPU(s)", "TEMPO(s)", "CMD", "DETALHE");
+    printf("--------------------------------------------------------------------------------------------------\n");
+
+    /* 1. Linha do próprio processo pai (mpmc) */
+    getrusage(RUSAGE_SELF, &uso_mpmc);
+    timeradd(&uso_mpmc.ru_utime, &uso_mpmc.ru_stime, &cpu_pai);
+    formatar_duracao(duracao, sizeof(duracao), &tempo_inicio_mpmc, &agora_ts);
+    snprintf(cmd, sizeof(cmd), "mpmc %d %d", num_estruturas, paradigma_atual);
+    printf("%-6u %-7d %-7d %-12s %ld.%06ld   %-10s %-20s %s\n",
+           (unsigned)uid, (int)pid_mpmc, (int)getppid(), "Rodando",
+           (long)cpu_pai.tv_sec, (long)cpu_pai.tv_usec,
+           duracao, cmd, "shell >>");
+
+    /* 2. Linhas dos processos filhos registrados na tabela interna */
+    for (i = 0; i < num_filhos; i++) {
+        proc_info_t *f = &filhos[i];
+        const char *estado_texto = "Bloqueado";
+        long cpu_s = (long)f->cpu.tv_sec;
+        long cpu_us = (long)f->cpu.tv_usec;
+
+        snprintf(cmd, sizeof(cmd), "%s %d %d %d",
+                 f->tipo == 'P' ? "produz" : "consome",
+                 f->estrutura, f->n_msgs, f->ack);
+
+        if (f->finalizado) {
+            estado_texto = "Finalizado";
+            formatar_duracao(duracao, sizeof(duracao), &f->inicio, &f->fim);
+            if (WIFEXITED(f->status)) {
+                snprintf(detalhe, sizeof(detalhe), "codigo %d", WEXITSTATUS(f->status));
+            } else if (WIFSIGNALED(f->status)) {
+                snprintf(detalhe, sizeof(detalhe), "sinal %d (%s)",
+                         WTERMSIG(f->status), strsignal(WTERMSIG(f->status)));
+            } else {
+                snprintf(detalhe, sizeof(detalhe), "-");
+            }
+        } else {
+            long long ns = cpu_processo(f->pid);
+            if (ns < 0) {
+                estado_texto = "Rodando";
+                snprintf(detalhe, sizeof(detalhe), "em execucao na CPU");
+            } else {
+                estado_texto = "Bloqueado";
+                cpu_s = (long)(ns / 1000000000LL);
+                cpu_us = (long)((ns % 1000000000LL) / 1000LL);
+                if (f->tipo == 'C' && f->aguarda_vez && !f->tem_vez) {
+                    snprintf(detalhe, sizeof(detalhe), "aguardando vez (SIGUSR1)");
+                } else if (f->ack == ACK_WAIT) {
+                    snprintf(detalhe, sizeof(detalhe), "aguardando buffer (ack=1)");
+                } else {
+                    snprintf(detalhe, sizeof(detalhe), "aguardando recurso");
+                }
+            }
+            formatar_duracao(duracao, sizeof(duracao), &f->inicio, &agora_ts);
+        }
+
+        printf("%-6u %-7d %-7d %-12s %ld.%06ld   %-10s %-20s %s\n",
+               (unsigned)uid, (int)f->pid, (int)pid_mpmc, estado_texto,
+               cpu_s, cpu_us, duracao, cmd, detalhe);
+    }
+    printf("\n");
+}
+
+
 /* Executado com os sinais tratados bloqueados (como todo o código fora da
  * espera por comandos): nenhuma etapa é interrompida */
 static void comando_shutdown(void) {
@@ -745,9 +824,11 @@ static void processar_linha(char *linha) {
             return;
         }
         comando_shutdown();
+    } else if (strcmp(args[0], "ps") == 0) {
+        comando_ps();
     } else {
         printf("Comando desconhecido: '%s'\n", args[0]);
-        printf("Comandos disponíveis: produz, consome, shutdown\n");
+        printf("Comandos disponíveis: produz, consome, ps, shutdown\n");
     }
 }
 
@@ -792,7 +873,7 @@ int main(int argc, char *argv[]) {
     definir_dir_executaveis();
     inicializar_sistema(p, paradigma);
 
-    printf("\nSistema MPMC inicializado. Aguardando comandos...\n");
+    printf("\nSistema MPMC inicializado (PID %d). Aguardando comandos...\n", pid_mpmc);
     printf("Digite 'shutdown' para finalizar o sistema.\n\n");
 
     while (1) {
@@ -822,7 +903,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        mostrar_prompt = 1;
+        // mostrar_prompt = 1;
         if (fgets(linha, sizeof(linha), stdin) == NULL) {
             /* EOF na entrada: encerra liberando os recursos */
             printf("\nFim da entrada.\n");
@@ -838,6 +919,10 @@ int main(int argc, char *argv[]) {
             continue;
         }
         processar_linha(linha);
+        /* Correção para mostrar o prompt (">>") apenas quando todos os logs do processo filho
+        solicitado forem exibindos na tela, evitando race condition entre as saídas*/
+        aguardar_estabilidade();
+        mostrar_prompt = 1;
     }
 
     return 0;
