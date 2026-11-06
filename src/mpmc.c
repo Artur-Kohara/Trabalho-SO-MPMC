@@ -602,39 +602,39 @@ static void comando_consome(char *args[]) {
     printf("Processo consome (PID %d) criado.\n", pid);
 }
 
-/*Exibe a tabela dos processos interna, com as informações
-mais relevantes*/
+/* Exibe a tabela de processos interna com 
+as informações mais relevantes */
 
 static void comando_ps(void) {
     int i;
     uid_t uid = getuid();
     struct timespec agora_ts;
     struct rusage uso_mpmc;
-    char duracao[32], cmd[64], situacao[64];
+    struct timeval cpu_pai;
+    char duracao[32], cmd[64], detalhe[64];
 
     /* Atualiza o estado dos filhos que já terminaram antes de exibir a tabela */
     processar_eventos();
     agora(&agora_ts);
 
-    printf("\n%-6s %-7s %-7s %-4s %-10s %-10s %-22s %s\n",
-           "UID", "PID", "PPID", "S", "CPU(s)", "TEMPO(s)", "CMD", "SITUACAO");
-    printf("--------------------------------------------------------------------------------------------\n");
+    printf("\n%-6s %-7s %-7s %-12s %-10s %-10s %-20s %s\n",
+           "UID", "PID", "PPID", "ESTADO", "CPU(s)", "TEMPO(s)", "CMD", "DETALHE");
+    printf("--------------------------------------------------------------------------------------------------\n");
 
     /* 1. Linha do próprio processo pai (mpmc) */
     getrusage(RUSAGE_SELF, &uso_mpmc);
-    struct timeval cpu_pai;
     timeradd(&uso_mpmc.ru_utime, &uso_mpmc.ru_stime, &cpu_pai);
     formatar_duracao(duracao, sizeof(duracao), &tempo_inicio_mpmc, &agora_ts);
     snprintf(cmd, sizeof(cmd), "mpmc %d %d", num_estruturas, paradigma_atual);
-    printf("%-6u %-7d %-7d %-4c %ld.%06ld   %-10s %-22s %s\n",
-           (unsigned)uid, (int)pid_mpmc, (int)getppid(), 'R',
+    printf("%-6u %-7d %-7d %-12s %ld.%06ld   %-10s %-20s %s\n",
+           (unsigned)uid, (int)pid_mpmc, (int)getppid(), "Rodando",
            (long)cpu_pai.tv_sec, (long)cpu_pai.tv_usec,
-           duracao, cmd, "rodando (shell >>)");
+           duracao, cmd, "shell >>");
 
     /* 2. Linhas dos processos filhos registrados na tabela interna */
     for (i = 0; i < num_filhos; i++) {
         proc_info_t *f = &filhos[i];
-        char estado_letra = 'S';
+        const char *estado_texto = "Bloqueado";
         long cpu_s = (long)f->cpu.tv_sec;
         long cpu_us = (long)f->cpu.tv_usec;
 
@@ -643,41 +643,43 @@ static void comando_ps(void) {
                  f->estrutura, f->n_msgs, f->ack);
 
         if (f->finalizado) {
-            // Se estiver finalizado, imprime estado 'X'
-            estado_letra = 'X';
+            estado_texto = "Finalizado";
             formatar_duracao(duracao, sizeof(duracao), &f->inicio, &f->fim);
             if (WIFEXITED(f->status)) {
-                snprintf(situacao, sizeof(situacao), "finalizado (cod %d)", WEXITSTATUS(f->status));
+                snprintf(detalhe, sizeof(detalhe), "codigo %d", WEXITSTATUS(f->status));
             } else if (WIFSIGNALED(f->status)) {
-                snprintf(situacao, sizeof(situacao), "morto por sinal %d", WTERMSIG(f->status));
+                snprintf(detalhe, sizeof(detalhe), "sinal %d (%s)",
+                         WTERMSIG(f->status), strsignal(WTERMSIG(f->status)));
             } else {
-                snprintf(situacao, sizeof(situacao), "finalizado");
+                snprintf(detalhe, sizeof(detalhe), "-");
             }
         } else {
             long long ns = cpu_processo(f->pid);
             if (ns < 0) {
-                estado_letra = 'R';
+                estado_texto = "Rodando";
+                snprintf(detalhe, sizeof(detalhe), "em execucao na CPU");
             } else {
-                estado_letra = 'S';
+                estado_texto = "Bloqueado";
                 cpu_s = (long)(ns / 1000000000LL);
                 cpu_us = (long)((ns % 1000000000LL) / 1000LL);
+                if (f->tipo == 'C' && f->aguarda_vez && !f->tem_vez) {
+                    snprintf(detalhe, sizeof(detalhe), "aguardando vez (SIGUSR1)");
+                } else if (f->ack == ACK_WAIT) {
+                    snprintf(detalhe, sizeof(detalhe), "aguardando buffer (ack=1)");
+                } else {
+                    snprintf(detalhe, sizeof(detalhe), "aguardando recurso");
+                }
             }
             formatar_duracao(duracao, sizeof(duracao), &f->inicio, &agora_ts);
-            if (f->tipo == 'C' && f->aguarda_vez && !f->tem_vez) {
-                snprintf(situacao, sizeof(situacao), "bloqueado (vez/SIGUSR1)");
-            } else if (f->ack == ACK_WAIT) {
-                snprintf(situacao, sizeof(situacao), "bloqueado (ack=1)");
-            } else {
-                snprintf(situacao, sizeof(situacao), "em execucao");
-            }
         }
 
-        printf("%-6u %-7d %-7d %-4c %ld.%06ld   %-10s %-22s %s\n",
-               (unsigned)uid, (int)f->pid, (int)pid_mpmc, estado_letra,
-               cpu_s, cpu_us, duracao, cmd, situacao);
+        printf("%-6u %-7d %-7d %-12s %ld.%06ld   %-10s %-20s %s\n",
+               (unsigned)uid, (int)f->pid, (int)pid_mpmc, estado_texto,
+               cpu_s, cpu_us, duracao, cmd, detalhe);
     }
     printf("\n");
 }
+
 
 /* Executado com os sinais tratados bloqueados (como todo o código fora da
  * espera por comandos): nenhuma etapa é interrompida */
